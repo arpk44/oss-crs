@@ -63,8 +63,6 @@ def main():
                             help='Sanitizer (default: address)')
     run_parser.add_argument('--architecture', default='x86_64',
                             help='Architecture (default: x86_64)')
-    run_parser.add_argument('--output',
-                            help='Output directory for CRS results')
     run_parser.add_argument('--hints',
                             help='Directory containing hints (SARIF reports and corpus)')
     run_parser.add_argument('--harness-source',
@@ -103,9 +101,6 @@ def main():
 
     # Validate paths for run command
     if args.command == 'run':
-        if args.output and not Path(args.output).exists():
-            logging.error(f"Output directory does not exist: {args.output}")
-            return 1
         if args.hints and not Path(args.hints).exists():
             logging.error(f"Hints directory does not exist: {args.hints}")
             return 1
@@ -139,7 +134,6 @@ def main():
             sanitizer=args.sanitizer,
             architecture=args.architecture,
             registry_dir=args.registry_dir,
-            output_dir=args.output,
             hints_dir=args.hints,
             harness_source=args.harness_source,
             external_litellm=args.external_litellm

@@ -284,7 +284,6 @@ def run_crs(config_dir, project_name, fuzzer_name, fuzzer_args,
             engine='libfuzzer', sanitizer='address',
             architecture='x86_64', check_project_fn=None,
             registry_dir=None,
-            output_dir=None,
             hints_dir=None,
             harness_source=None,
             external_litellm=False):
@@ -304,7 +303,6 @@ def run_crs(config_dir, project_name, fuzzer_name, fuzzer_args,
         architecture: Architecture (default: x86_64)
         check_project_fn: Optional function to check if project exists
         registry_dir: Optional path to local oss-crs-registry directory
-        output_dir: Optional output directory for CRS results
         hints_dir: Optional directory containing hints (SARIF and corpus)
         harness_source: Optional path to harness source file (will be mounted to container)
         external_litellm: Use external LiteLLM instance (default: False)
