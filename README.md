@@ -52,6 +52,25 @@ uv run oss-crs run example_configs/ensemble-java java-example ExampleFuzzer
 
 **Expected Output**: The CRS will launch successfully with running logs showing CPU core allocation (base numbers 0-15). For ensemble CRSs, CPU cores are evenly distributed among the contained CRSs.
 
+## Testing
+
+### Quick Test Script
+
+For quick testing with custom projects, use the provided test script:
+
+```bash
+# Test with custom project (project name inferred from basename)
+./scripts/test-build.sh /home/yufu/aixcc_shared/CRSBench/benchmarks/atlanta-binutils-delta-01
+
+# Test with both custom project and source path
+./scripts/test-build.sh ~/benchmarks/my-project ~/src/my-source
+```
+
+The test script automatically:
+- Infers project name from the basename of the project path
+- Uses `example_configs/ensemble-c` as the CRS configuration
+- Enables `--overwrite` flag for convenient re-testing
+
 ## Options
 
 ### External LiteLLM Proxy
@@ -126,7 +145,7 @@ uv run oss-crs build example_configs/atlantis-c-libafl \
 
 For custom projects that don't clone source in their Dockerfile, use `--clone` to automatically clone the repository specified in `main_repo` field of `project.yaml`.
 
-The source will be cloned to `build/src/` with depth 1 and recursive submodules.
+The source will be cloned to `build/src/{project_name}/` with depth 1 and recursive submodules.
 
 ```bash
 # Clone source for custom project
@@ -135,7 +154,7 @@ uv run oss-crs build --clone \
                      example_configs/crs-libfuzzer \
                      my-project
 
-# Clone is idempotent - skips if build/src/ already exists
+# Clone is idempotent - skips if build/src/{project_name}/ already exists
 uv run oss-crs build --clone \
                      --project-path ~/benchmarks/atlanta-binutils-delta-01 \
                      example_configs/ensemble-c \
