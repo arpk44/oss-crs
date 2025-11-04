@@ -65,6 +65,48 @@ def _build_project_image(project_name, oss_fuzz_dir, architecture):
     return True
 
 
+def _save_parent_image_tarballs(crs_list, project_name, build_dir, project_image_prefix):
+    """
+    Save parent image tarballs for CRS that need dind.
+
+    Args:
+        crs_list: List of CRS configurations with 'name' and 'dind' keys
+        project_name: Name of the project
+        build_dir: Path to build directory
+        project_image_prefix: Prefix for project images (e.g., gcr.io/oss-fuzz)
+
+    Returns:
+        str: Path to parent image tarball directory, or None if no dind CRS
+    """
+    # Check if any CRS needs dind
+    dind_crs = [crs for crs in crs_list if crs.get('dind', False)]
+    if not dind_crs:
+        return None
+
+    # Create parent-images directory
+    parent_images_dir = Path(build_dir) / 'crs' / 'parent-images'
+    parent_images_dir.mkdir(parents=True, exist_ok=True)
+
+    # Parent image name
+    parent_image = f"{project_image_prefix}/{project_name}"
+    tarball_path = parent_images_dir / f"{project_name}.tar"
+
+    # Save parent image to tarball if not already exists
+    if tarball_path.exists():
+        logger.info(f"Parent image tarball already exists: {tarball_path}")
+    else:
+        logger.info(f"Saving parent image {parent_image} to {tarball_path}")
+        save_cmd = ['docker', 'save', parent_image, '-o', str(tarball_path)]
+        try:
+            subprocess.check_call(save_cmd)
+            logger.info(f"Successfully saved parent image to {tarball_path}")
+        except subprocess.CalledProcessError:
+            logger.error(f"Failed to save parent image {parent_image}")
+            return None
+
+    return str(parent_images_dir)
+
+
 def _clone_oss_fuzz_if_needed(oss_fuzz_dir):
     if not Path(oss_fuzz_dir).exists():
         logging.info(f"Cloning oss-fuzz to: {oss_fuzz_dir}")
@@ -250,7 +292,7 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
     # Generate compose files using render_compose module
     logger.info('Generating compose-build.yaml')
     try:
-        build_profiles, config_hash, crs_build_dir = render_compose.render_build_compose(
+        build_profiles, config_hash, crs_build_dir, crs_list = render_compose.render_build_compose(
             config_dir=config_dir,
             build_dir=build_dir,
             oss_fuzz_dir=oss_fuzz_dir,
@@ -267,6 +309,11 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
     except Exception as e:
         logger.error('Failed to generate compose files: %s', e)
         return False
+
+    # Save parent image tarballs for dind CRS
+    parent_images_dir = _save_parent_image_tarballs(crs_list, project_name, build_dir, project_image_prefix)
+    if parent_images_dir:
+        logger.info(f"Parent image tarballs saved to: {parent_images_dir}")
 
     if not build_profiles:
         logger.error('No build profiles found')

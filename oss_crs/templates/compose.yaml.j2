@@ -1,3 +1,25 @@
+{# Macro to generate LITELLM_URL environment variable #}
+{%- macro litellm_url_env() %}
+{%- if external_litellm %}
+      - LITELLM_URL=${LITELLM_URL}
+{%- else %}
+      - LITELLM_URL=http://crs-litellm-{{ config_hash }}-litellm-1:4000
+{%- endif %}
+{%- endmacro %}
+
+{# Macro to generate CRS network configuration #}
+{%- macro crs_network() %}
+{%- if not external_litellm %}
+    networks:
+      - {{ config_hash }}_crs_network
+{%- endif %}
+{%- endmacro %}
+
+{# Macro to generate volume name #}
+{%- macro volume_name(volume_type, crs_name) -%}
+{{ config_hash }}_{{ volume_type }}_{{ crs_name }}
+{%- endmacro %}
+
 services:
 {%- for crs in crs_list %}
 
@@ -10,20 +32,16 @@ services:
       context: {{ key_provisioner_path }}
       dockerfile: Dockerfile
     environment:
+{{ litellm_url_env() }}
 {%- if external_litellm %}
-      - LITELLM_URL=${LITELLM_URL}
       - LITELLM_KEY=${LITELLM_KEY}
       - EXTERNAL_LITELLM=true
 {%- else %}
-      - LITELLM_URL=http://crs-litellm-{{ config_hash }}-litellm-1:4000
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
 {%- endif %}
-{%- if not external_litellm %}
-    networks:
-      - {{ config_hash }}_crs_network
-{%- endif %}
+{{ crs_network() }}
     volumes:
-      - {{ config_hash }}_keys_data_{{ crs.name }}:/keys/{{ crs.name }}
+      - {{ volume_name('keys_data', crs.name) }}:/keys/{{ crs.name }}
       - {{ config_dir }}:/config:ro
     command: ["python", "key_provisioner.py", "--config-dir", "/config", "--crs", "{{ crs.name }}"]
     # restart: on-failure:5
@@ -33,14 +51,16 @@ services:
     profiles:
       - {{ crs.name }}_builder
     image: {{ project }}_{{ crs.name }}_builder{% if source_tag %}:{{ source_tag }}{% endif %}
+{%- if crs.dind %}
+    privileged: true
+{%- endif %}
     depends_on:
       {{ crs.name }}_key_provisioner:
         condition: service_started
     environment:
-{%- if external_litellm %}
-      - LITELLM_URL=${LITELLM_URL}
-{%- else %}
-      - LITELLM_URL=http://crs-litellm-{{ config_hash }}-litellm-1:4000
+{{ litellm_url_env() }}
+{%- if crs.dind %}
+      - PARENT_IMAGE={{ parent_image_prefix }}/{{ project }}
 {%- endif %}
       - FUZZING_ENGINE={{ engine }}
       - SANITIZER={{ sanitizer }}
@@ -48,10 +68,7 @@ services:
       - PROJECT_NAME={{ project }}
       - FUZZING_LANGUAGE={{ project_language }}
       - HELPER=True
-{%- if not external_litellm %}
-    networks:
-      - {{ config_hash }}_crs_network
-{%- endif %}
+{{ crs_network() }}
     build:
       context: {{ crs.path }}
       dockerfile: builder.Dockerfile
@@ -60,11 +77,16 @@ services:
       args:
         - CRS_TARGET={{ project }}
         - PROJECT_PATH={{ oss_fuzz_path }}/projects/{{ project }}
+{%- if not crs.dind %}
         - parent_image={{ parent_image_prefix }}/{{ project }}
+{%- endif %}
     volumes:
       - {{ build_dir }}/out/{{ crs.name }}/{{ project }}:/out
       - {{ build_dir }}/work/{{ crs.name }}/{{ project }}:/work
-      - {{ config_hash }}_keys_data_{{ crs.name }}:/keys:ro
+      - {{ volume_name('keys_data', crs.name) }}:/keys:ro
+{%- if crs.dind %}
+      - {{ build_dir }}/crs/parent-images/{{ project }}.tar:/project-image.tar:ro
+{%- endif %}
 {%- if source_path %}
       - {{ source_path }}:/local-source-mount
 {%- endif %}
@@ -76,11 +98,7 @@ services:
     image: {{ crs.name }}_runner
     privileged: true
     environment:
-{%- if external_litellm %}
-      - LITELLM_URL=${LITELLM_URL}
-{%- else %}
-      - LITELLM_URL=http://crs-litellm-{{ config_hash }}-litellm-1:4000
-{%- endif %}
+{{ litellm_url_env() }}
       - FUZZING_ENGINE={{ engine }}
       - SANITIZER={{ sanitizer }}
       - RUN_FUZZER_MODE=interactive
@@ -88,10 +106,7 @@ services:
       - CPUSET_CPUS={{ crs.cpuset }}
       - MEMORY_LIMIT={{ crs.memory_limit | string }}
       - CRS_TARGET={{ project }}
-{%- if not external_litellm %}
-    networks:
-      - {{ config_hash }}_crs_network
-{%- endif %}
+{{ crs_network() }}
     build:
       context: {{ crs.path }}
       dockerfile: runner.Dockerfile
@@ -99,7 +114,7 @@ services:
         - PROJECT_PATH={{ oss_fuzz_path }}/projects/{{ project }}
     volumes:
       - {{ build_dir }}/out/{{ crs.name }}/{{ project }}:/out
-      - {{ config_hash }}_keys_data_{{ crs.name }}:/keys:ro
+      - {{ volume_name('keys_data', crs.name) }}:/keys:ro
 {%- if harness_source %}
       - {{ harness_source }}:/harness-source:ro
 {%- endif %}
@@ -121,6 +136,6 @@ networks:
 {%- endif %}
 volumes:
 {%- for crs in crs_list %}
-  {{ config_hash }}_keys_data_{{ crs.name }}:
-    name: {{ config_hash }}_keys_data_{{ crs.name }}
+  {{ volume_name('keys_data', crs.name) }}:
+    name: {{ volume_name('keys_data', crs.name) }}
 {%- endfor %}

@@ -41,6 +41,7 @@ class ComposeEnvironment:
     config: Dict[str, Any]
     resource_config: Dict[str, Any]
     crs_paths: Dict[str, str]
+    crs_pkg_data: Dict[str, Dict[str, Any]]
 
 
 def load_config(config_dir: Path) -> Dict[str, Any]:
@@ -219,7 +220,8 @@ def clone_crs_if_needed(crs_name: str, crs_build_dir: Path, registry_dir: Path) 
 
 
 def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
-                       crs_paths: Dict[str, str]) -> List[Dict[str, Any]]:
+                       crs_paths: Dict[str, str],
+                       crs_pkg_data: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Extract CRS configurations for a specific worker.
 
@@ -235,6 +237,7 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
       worker_name: Name of the worker
       resource_config: Resource configuration dictionary
       crs_paths: Mapping of crs_name -> actual filesystem path
+      crs_pkg_data: Mapping of crs_name -> pkg.yaml data
 
     Exits with error if:
     - CPU cores conflict (two CRS trying to use same core)
@@ -313,12 +316,17 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
         used_cpus.update(crs_cpus_set)
         used_memory_mb += crs_memory_mb
 
+        # Get dind flag from CRS pkg.yaml dependencies
+        crs_dependencies = crs_pkg_data.get(crs_name, {}).get('dependencies', [])
+        crs_dind = 'dind' in crs_dependencies if crs_dependencies else False
+
         result.append({
             'name': crs_name,
             'path': crs_paths[crs_name],
             'cpuset': format_cpu_list(crs_cpus_list),
             'memory_limit': format_memory(crs_memory_mb),
-            'suffix': 'runner'
+            'suffix': 'runner',
+            'dind': crs_dind
         })
 
     # Process auto-divide CRS instances
@@ -364,12 +372,17 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
             else:
                 crs_memory = memory_per_crs
 
+            # Get dind flag from CRS pkg.yaml dependencies
+            crs_dependencies = crs_pkg_data.get(crs_name, {}).get('dependencies', [])
+            crs_dind = 'dind' in crs_dependencies if crs_dependencies else False
+
             result.append({
                 'name': crs_name,
                 'path': crs_paths[crs_name],
                 'cpuset': format_cpu_list(crs_cpus_list),
                 'memory_limit': format_memory(crs_memory),
-                'suffix': 'runner'
+                'suffix': 'runner',
+                'dind': crs_dind
             })
 
     return result
@@ -485,11 +498,26 @@ def _setup_compose_environment(config_dir: str, build_dir: str, oss_fuzz_path: s
     # Clone all required CRS repositories and build path mapping
     crs_configs = resource_config.get('crs', {})
     crs_paths = {}
+    crs_pkg_data = {}
     for crs_name in crs_configs.keys():
         crs_path = clone_crs_if_needed(crs_name, crs_build_dir, oss_crs_registry_path)
         if crs_path is None:
             raise RuntimeError(f"Failed to prepare CRS '{crs_name}'")
         crs_paths[crs_name] = str(crs_path)
+
+        # Load pkg.yaml for this CRS from registry
+        pkg_yaml_path = oss_crs_registry_path / "crs" / crs_name / "pkg.yaml"
+        if pkg_yaml_path.exists():
+            try:
+                with open(pkg_yaml_path) as f:
+                    pkg_data = yaml.safe_load(f)
+                    crs_pkg_data[crs_name] = pkg_data if pkg_data else {}
+            except yaml.YAMLError as e:
+                logging.warning(f"Failed to parse pkg.yaml for CRS '{crs_name}': {e}")
+                crs_pkg_data[crs_name] = {}
+        else:
+            logging.warning(f"pkg.yaml not found for CRS '{crs_name}' at {pkg_yaml_path}")
+            crs_pkg_data[crs_name] = {}
 
     # Check for .env file in config-dir if no explicit env-file was provided
     if not env_file_path:
@@ -511,6 +539,7 @@ def _setup_compose_environment(config_dir: str, build_dir: str, oss_fuzz_path: s
         config=config,
         resource_config=resource_config,
         crs_paths=crs_paths,
+        crs_pkg_data=crs_pkg_data,
     )
 
 
@@ -597,12 +626,12 @@ def render_build_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
                          architecture: str, registry_dir: str,
                          source_path: str = None, env_file: str = None,
                          project_image_prefix: str = 'gcr.io/oss-fuzz',
-                         external_litellm: bool = False) -> Tuple[List[str], str, str]:
+                         external_litellm: bool = False) -> Tuple[List[str], str, str, List[Dict]]:
     """
     Programmatic interface for build mode.
 
     Returns:
-      Tuple of (build_profile_names, config_hash, crs_build_dir)
+      Tuple of (build_profile_names, config_hash, crs_build_dir, crs_list)
     """
     # Common setup
     env = _setup_compose_environment(config_dir, build_dir, oss_fuzz_dir, registry_dir, env_file, mode='build')
@@ -617,6 +646,7 @@ def render_build_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
     output_dir = env.output_dir
     resource_config = env.resource_config
     crs_paths = env.crs_paths
+    crs_pkg_data = env.crs_pkg_data
 
     # Validate workers exist
     workers = resource_config.get('workers', {})
@@ -628,7 +658,7 @@ def render_build_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
     all_build_profiles = []
 
     for worker_name in workers.keys():
-        crs_list = get_crs_for_worker(worker_name, resource_config, crs_paths)
+        crs_list = get_crs_for_worker(worker_name, resource_config, crs_paths, crs_pkg_data)
         if crs_list:
             all_crs_list.extend(crs_list)
             all_build_profiles.extend([f"{crs['name']}_builder" for crs in crs_list])
@@ -667,7 +697,7 @@ def render_build_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
     output_file = output_dir / "compose-build.yaml"
     output_file.write_text(rendered)
 
-    return all_build_profiles, config_hash, str(crs_build_dir)
+    return all_build_profiles, config_hash, str(crs_build_dir), all_crs_list
 
 
 def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
@@ -696,6 +726,7 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
     output_dir = env.output_dir
     resource_config = env.resource_config
     crs_paths = env.crs_paths
+    crs_pkg_data = env.crs_pkg_data
 
     # Validate worker exists
     workers = resource_config.get('workers', {})
@@ -703,7 +734,7 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
         raise ValueError(f"Worker '{worker}' not found in config-resource.yaml")
 
     # Get CRS list for this worker
-    crs_list = get_crs_for_worker(worker, resource_config, crs_paths)
+    crs_list = get_crs_for_worker(worker, resource_config, crs_paths, crs_pkg_data)
 
     if not crs_list:
         raise ValueError(f"No CRS instances configured for worker '{worker}'")
