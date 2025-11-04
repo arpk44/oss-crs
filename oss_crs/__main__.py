@@ -43,6 +43,8 @@ def main():
                               help='Project image prefix (default: gcr.io/oss-fuzz)')
     build_parser.add_argument('--external-litellm', action='store_true',
                               help='Use external LiteLLM instance (requires LITELLM_URL and LITELLM_KEY env vars)')
+    build_parser.add_argument('--overwrite', action='store_true',
+                              help='Overwrite existing project in oss-fuzz/projects/ when using project_path')
 
     # run_crs subcommand
     run_parser = subparsers.add_parser('run', help='Run CRS')
@@ -111,6 +113,8 @@ def main():
             sanitizer=args.sanitizer,
             architecture=args.architecture,
             source_path=args.source_path,
+            project_path=args.project_path,
+            overwrite=args.overwrite,
             registry_dir=args.registry_dir,
             project_image_prefix=args.project_image_prefix,
             external_litellm=args.external_litellm

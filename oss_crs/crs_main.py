@@ -2,6 +2,7 @@
 """Main CRS implementation for build and run operations."""
 
 import os
+import shutil
 import subprocess
 import sys
 import atexit
@@ -80,6 +81,7 @@ def _clone_oss_fuzz_if_needed(oss_fuzz_dir):
 def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
               engine='libfuzzer', sanitizer='address',
               architecture='x86_64', source_path=None,
+              project_path=None, overwrite=False,
               check_project_fn=None,
               registry_dir=None, project_image_prefix='gcr.io/oss-fuzz',
               external_litellm=False):
@@ -95,6 +97,8 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
         sanitizer: Sanitizer to use (default: address)
         architecture: Architecture (default: x86_64)
         source_path: Optional path to local source
+        project_path: Optional path to local OSS-compatible project
+        overwrite: Overwrite existing project in oss-fuzz/projects/ (default: False)
         check_project_fn: Optional function to check if project exists
         registry_dir: Optional path to local oss-crs-registry directory
         project_image_prefix: Project image prefix (default: gcr.io/oss-fuzz)
@@ -114,7 +118,44 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
 
     _clone_oss_fuzz_if_needed(oss_fuzz_dir)
 
-    # Build project image if function provided
+    # Copy project_path to oss-fuzz/projects/{project_name} if provided
+    if project_path:
+        src_path = Path(project_path).resolve()
+
+        # Validate source project path
+        if not src_path.exists():
+            logger.error(f"Project path does not exist: {src_path}")
+            return False
+        if not src_path.is_dir():
+            logger.error(f"Project path is not a directory: {src_path}")
+            return False
+        if not (src_path / 'project.yaml').exists():
+            logger.error(f"project.yaml not found in: {src_path}")
+            return False
+
+        # Destination path (handles nested names like aixcc/c/project)
+        dest_path = Path(oss_fuzz_dir) / 'projects' / project_name
+
+        # Check if destination exists
+        if dest_path.exists():
+            if not overwrite:
+                logger.error(
+                    f"Project already exists: {dest_path}. "
+                    f"Use --overwrite to replace it."
+                )
+                return False
+            logger.info(f"Overwriting existing project at: {dest_path}")
+            shutil.rmtree(dest_path)
+
+        # Create parent directories for nested project names
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy project to oss-fuzz projects directory
+        logger.info(f"Copying project from {src_path} to {dest_path}")
+        shutil.copytree(src_path, dest_path)
+        logger.info(f"Successfully copied project to {dest_path}")
+
+    # Build project image
     _build_project_image(project_name, oss_fuzz_dir, architecture)
 
     # Resolve registry_dir if provided
