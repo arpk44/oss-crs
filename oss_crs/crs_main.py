@@ -244,7 +244,7 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
     abs_source_path = None
     if source_path:
         abs_source_path = _get_absolute_path(source_path)
-        source_tag = hashlib.sha256(abs_source_path.encode()).hexdigest()[:12]
+        source_tag = hashlib.sha256(abs_source_path.encode() + project_name.encode()).hexdigest()[:12]
         logger.info('Using source tag for image versioning: %s', source_tag)
 
     # Generate compose files using render_compose module

@@ -561,7 +561,7 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
     # Compute source_tag from source_path if provided
     source_tag = None
     if source_path:
-        source_tag = hashlib.sha256(source_path.encode()).hexdigest()[:12]
+        source_tag = hashlib.sha256(source_path.encode() + project.encode()).hexdigest()[:12]
 
     rendered = template.render(
         crs_list=crs_list,
