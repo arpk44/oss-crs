@@ -26,11 +26,11 @@ logger = logging.getLogger(__name__)
 
 class LiteLLMKeyProvisioner:
   """Handles provisioning of LiteLLM API keys."""
-  
+
   def __init__(self, litellm_url: str, master_key: str):
     """
     Initialize the key provisioner.
-    
+
     Args:
       litellm_url: Base URL of the LiteLLM proxy service
       master_key: Master key for authenticating with LiteLLM proxy
@@ -42,11 +42,11 @@ class LiteLLMKeyProvisioner:
       'Authorization': f'Bearer {master_key}',
       'Content-Type': 'application/json'
     })
-  
+
   def health_check(self) -> bool:
     """
     Check if the LiteLLM proxy service is healthy.
-    
+
     Returns:
       True if service is healthy, False otherwise
     """
@@ -61,7 +61,7 @@ class LiteLLMKeyProvisioner:
     except requests.exceptions.RequestException as e:
       logger.error(f"Failed to connect to LiteLLM proxy: {e}")
       return False
-  
+
   def generate_key(self, user_id: str, max_budget: Optional[float] = None,
                   models: Optional[list] = None, duration: Optional[str] = None,
                   tpm_limit: Optional[int] = None, rpm_limit: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -93,14 +93,14 @@ class LiteLLMKeyProvisioner:
       payload["tpm_limit"] = tpm_limit
     if rpm_limit is not None:
       payload["rpm_limit"] = rpm_limit
-    
+
     try:
       response = self.session.post(
         f"{self.litellm_url}/key/generate",
         json=payload,
         timeout=30
       )
-      
+
       if response.status_code == 200:
         key_data = response.json()
         logger.info(f"Successfully generated key for user {user_id}")
@@ -108,11 +108,11 @@ class LiteLLMKeyProvisioner:
       else:
         logger.error(f"Failed to generate key: {response.status_code} - {response.text}")
         return None
-        
+
     except requests.exceptions.RequestException as e:
       logger.error(f"Request failed while generating key: {e}")
       return None
-  
+
   def store_key(self, user_id: str, key_data: Dict[str, Any]) -> bool:
     """
     Store the generated key to a file.

@@ -83,7 +83,7 @@ def main():
         logging.info(f"Creating build directory: {build_dir}")
         build_dir.mkdir(parents=True, exist_ok=True)
 
-        
+
     # Ensure oss-fuzz directory exists
     if args.oss_fuzz_dir is None:
         oss_fuzz_dir = Path(args.build_dir) / "crs" / "oss-fuzz"

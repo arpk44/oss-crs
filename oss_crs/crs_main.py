@@ -113,7 +113,7 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
         return False
 
     _clone_oss_fuzz_if_needed(oss_fuzz_dir)
-    
+
     # Build project image if function provided
     _build_project_image(project_name, oss_fuzz_dir, architecture)
 
