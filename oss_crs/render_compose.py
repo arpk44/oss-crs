@@ -570,6 +570,7 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
                               mode: str, config_hash: str,
                               fuzzer_command: List[str] = None,
                               source_path: str = None, harness_source: str = None,
+                              diff_path: str = None,
                               project_image_prefix: str = 'gcr.io/oss-fuzz',
                               external_litellm: bool = False) -> str:
     """Render the compose template for a specific worker."""
@@ -611,6 +612,7 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
         source_path=source_path,
         source_tag=source_tag,
         harness_source=harness_source,
+        diff_path=diff_path,
         parent_image_prefix=project_image_prefix,
         external_litellm=external_litellm
     )
@@ -706,6 +708,7 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
                        worker: str, fuzzer_command: List[str],
                        source_path: str = None, env_file: str = None,
                        harness_source: str = None,
+                       diff_path: str = None,
                        external_litellm: bool = False) -> Tuple[str, str]:
     """
     Programmatic interface for run mode.
@@ -767,6 +770,7 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
         fuzzer_command=fuzzer_command,
         source_path=source_path,
         harness_source=harness_source,
+        diff_path=diff_path,
         external_litellm=external_litellm
     )
 

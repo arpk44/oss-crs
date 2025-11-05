@@ -116,6 +116,9 @@ services:
 {%- if harness_source %}
       - {{ harness_source }}:/harness-source:ro
 {%- endif %}
+{%- if diff_path %}
+      - {{ diff_path }}:/ref.diff:ro
+{%- endif %}
     cpuset: {{ crs.cpuset }}
     deploy:
       resources:

@@ -121,6 +121,90 @@ def _clone_oss_fuzz_if_needed(oss_fuzz_dir):
     return True
 
 
+def _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
+    """
+    Validate that CRS mode requirements match the provided diff_path.
+
+    Args:
+        config_dir: Directory containing CRS configuration files
+        worker: Worker name
+        registry_dir: Path to oss-crs-registry directory
+        diff_path: Path to diff file (or None)
+
+    Returns:
+        bool: True if validation passes, False otherwise
+    """
+    config_resource_path = Path(config_dir) / 'config-resource.yaml'
+    if not config_resource_path.exists():
+        logger.error(f"config-resource.yaml not found: {config_resource_path}")
+        return False
+
+    with open(config_resource_path) as f:
+        resource_config = yaml.safe_load(f)
+
+    # Get CRS configurations
+    crs_configs = resource_config.get('crs', {})
+    if not crs_configs:
+        logger.error("No CRS defined in config-resource.yaml")
+        return False
+
+    # Determine registry path
+    if registry_dir:
+        oss_crs_registry_path = Path(registry_dir).resolve()
+    else:
+        # Use default location
+        oss_crs_registry_path = Path(__file__).parent.parent / 'oss-crs-registry'
+        if not oss_crs_registry_path.exists():
+            logger.warning(f"Registry not found at {oss_crs_registry_path}, skipping mode validation")
+            return True
+
+    # Check each CRS assigned to this worker
+    for crs_name, crs_config in crs_configs.items():
+        # Check if this CRS is assigned to the worker
+        crs_workers = crs_config.get('workers', [])
+        if worker not in crs_workers:
+            continue
+
+        # Load pkg.yaml for this CRS
+        pkg_yaml_path = oss_crs_registry_path / 'crs' / crs_name / 'pkg.yaml'
+        if not pkg_yaml_path.exists():
+            logger.warning(f"pkg.yaml not found for CRS '{crs_name}' at {pkg_yaml_path}, skipping mode validation")
+            continue
+
+        try:
+            with open(pkg_yaml_path) as f:
+                pkg_data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            logger.warning(f"Failed to parse pkg.yaml for CRS '{crs_name}': {e}, skipping mode validation")
+            continue
+
+        # Get supported modes (default to both if not specified)
+        supported_modes = pkg_data.get('mode', ['full', 'delta'])
+        if not isinstance(supported_modes, list):
+            supported_modes = [supported_modes]
+
+        # Validate mode requirements
+        if 'delta' in supported_modes and 'full' not in supported_modes:
+            # CRS only supports delta mode - diff is required
+            if not diff_path:
+                logger.error(
+                    f"CRS '{crs_name}' only supports delta mode but --diff was not specified. "
+                    f"Please provide a diff file with --diff."
+                )
+                return False
+        elif 'full' in supported_modes and 'delta' not in supported_modes:
+            # CRS only supports full mode - diff must not be specified
+            if diff_path:
+                logger.error(
+                    f"CRS '{crs_name}' only supports full mode but --diff was specified. "
+                    f"Please run without --diff."
+                )
+                return False
+        # If both modes are supported, no validation needed
+
+    return True
+
+
 def _clone_project_source(project_name, oss_fuzz_dir, build_dir):
     """
     Clone project source based on main_repo in project.yaml.
@@ -483,6 +567,7 @@ def run_crs(config_dir, project_name, fuzzer_name, fuzzer_args,
             registry_dir=None,
             hints_dir=None,
             harness_source=None,
+            diff_path=None,
             external_litellm=False):
     """
     Run CRS using docker compose.
@@ -518,6 +603,10 @@ def run_crs(config_dir, project_name, fuzzer_name, fuzzer_args,
 
     _clone_oss_fuzz_if_needed(oss_fuzz_dir)
 
+    # Validate CRS modes against diff_path
+    if not _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
+        return False
+
     # Resolve registry_dir if provided
     oss_crs_registry_path = None
     if registry_dir:
@@ -539,6 +628,7 @@ def run_crs(config_dir, project_name, fuzzer_name, fuzzer_args,
             worker=worker,
             fuzzer_command=fuzzer_command,
             harness_source=harness_source,
+            diff_path=diff_path,
             external_litellm=external_litellm
         )
         crs_build_dir = Path(crs_build_dir)

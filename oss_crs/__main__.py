@@ -74,6 +74,8 @@ def main():
                             help='Directory containing hints (SARIF reports and corpus)')
     run_parser.add_argument('--harness-source',
                             help='Path to harness source file for analysis')
+    run_parser.add_argument('--diff',
+                            help='Path to diff file for analysis')
     run_parser.add_argument('--external-litellm', action='store_true',
                             help='Use external LiteLLM instance (requires LITELLM_URL and LITELLM_KEY env vars)')
 
@@ -103,6 +105,9 @@ def main():
             return 1
         if args.harness_source and not Path(args.harness_source).exists():
             logging.error(f"Harness source file does not exist: {args.harness_source}")
+            return 1
+        if args.diff and not Path(args.diff).exists():
+            logging.error(f"Diff file does not exist: {args.diff}")
             return 1
 
     if args.command == 'build':
@@ -137,6 +142,7 @@ def main():
             registry_dir=args.registry_dir,
             hints_dir=args.hints,
             harness_source=args.harness_source,
+            diff_path=args.diff,
             external_litellm=args.external_litellm
         )
     else:
