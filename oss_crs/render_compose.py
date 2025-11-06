@@ -424,14 +424,14 @@ def _setup_compose_environment(config_dir: str, build_dir: str, oss_fuzz_path: s
     Returns:
         ComposeEnvironment dataclass containing all environment setup data
     """
-    # Convert strings to Path objects
+    # Convert strings to Path objects (already resolved from CLI)
     config_dir = Path(config_dir)
     build_dir = Path(build_dir)
     oss_fuzz_path = Path(oss_fuzz_path)
     template_path = TEMPLATE_DIR / "compose.yaml.j2"
     litellm_template_path = TEMPLATE_DIR / "compose-litellm.yaml.j2"
-    registry_dir_path = Path(registry_dir).resolve() if registry_dir else None
-    env_file_path = Path(env_file).resolve() if env_file else None
+    registry_dir_path = Path(registry_dir) if registry_dir else None
+    env_file_path = Path(env_file) if env_file else None
 
     # Compute config_hash from config-resource.yaml
     config_resource_path = config_dir / 'config-resource.yaml'
@@ -552,11 +552,9 @@ def render_litellm_compose(template_path: Path, config_dir: Path,
     template_content = template_path.read_text()
     template = Template(template_content)
 
-    config_dir_resolved = config_dir.resolve()
-
     rendered = template.render(
         config_hash=config_hash,
-        config_dir=str(config_dir_resolved),
+        config_dir=str(config_dir),
         crs_list=crs_list
     )
 
@@ -580,10 +578,8 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
     template_content = template_path.read_text()
     template = Template(template_content)
 
-    # Resolve config paths
-    config_resource_path = (config_dir / "config-resource.yaml").resolve()
-    config_dir_resolved = config_dir.resolve()
-    build_dir_resolved = build_dir.resolve()
+    # Construct config paths (already resolved from CLI)
+    config_resource_path = config_dir / "config-resource.yaml"
 
     # Get project language
     project_language = get_project_language(oss_fuzz_path, project)
@@ -597,7 +593,7 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
         crs_list=crs_list,
         worker_name=worker_name,
         oss_fuzz_path=str(oss_fuzz_path),
-        build_dir=str(build_dir_resolved),
+        build_dir=str(build_dir),
         key_provisioner_path=str(KEY_PROVISIONER_DIR),
         project=project,
         project_language=project_language,
@@ -606,7 +602,7 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
         architecture=architecture,
         fuzzer_command=fuzzer_command or [],
         config_resource_path=str(config_resource_path),
-        config_dir=str(config_dir_resolved),
+        config_dir=str(config_dir),
         mode=mode,
         config_hash=config_hash,
         source_path=source_path,

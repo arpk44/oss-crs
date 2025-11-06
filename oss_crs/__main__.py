@@ -20,18 +20,18 @@ def main():
 
     # build_crs subcommand
     build_parser = subparsers.add_parser('build', help='Build CRS for a project')
-    build_parser.add_argument('config_dir',
+    build_parser.add_argument('config_dir', type=Path,
                               help='Directory containing CRS configuration files')
     build_parser.add_argument('project', help='OSS-Fuzz project name')
-    build_parser.add_argument('source_path', nargs='?',
+    build_parser.add_argument('source_path', nargs='?', type=Path,
                               help='Optional path to local source')
-    build_parser.add_argument('--build-dir', default=str(Path.cwd() / 'build'),
+    build_parser.add_argument('--build-dir', type=Path, default=Path.cwd() / 'build',
                               help='Path to build directory (default: ./build)')
-    build_parser.add_argument('--project-path',
+    build_parser.add_argument('--project-path', type=Path,
                               help='Path to local OSS-compatible project')
-    build_parser.add_argument('--oss-fuzz-dir', default=None,
+    build_parser.add_argument('--oss-fuzz-dir', type=Path, default=None,
                               help='Path to oss-fuzz directory (default: ${BUILD_DIR}/crs/oss-fuzz)')
-    build_parser.add_argument('--registry-dir',
+    build_parser.add_argument('--registry-dir', type=Path,
                               help='Path to local oss-crs-registry directory')
     build_parser.add_argument('--engine', default='libfuzzer',
                               help='Fuzzing engine (default: libfuzzer)')
@@ -50,7 +50,7 @@ def main():
 
     # run_crs subcommand
     run_parser = subparsers.add_parser('run', help='Run CRS')
-    run_parser.add_argument('config_dir',
+    run_parser.add_argument('config_dir', type=Path,
                             help='Directory containing CRS configuration files')
     run_parser.add_argument('project', help='OSS-Fuzz project name')
     run_parser.add_argument('fuzzer_name', help='Name of the fuzzer')
@@ -58,11 +58,11 @@ def main():
                             help='Arguments to pass to the fuzzer')
     run_parser.add_argument('--worker', default='local',
                             help='Worker name (default: local)')
-    run_parser.add_argument('--build-dir', default=str(Path.cwd() / 'build'),
+    run_parser.add_argument('--build-dir', type=Path, default=Path.cwd() / 'build',
                             help='Path to build directory (default: ./build)')
-    run_parser.add_argument('--oss-fuzz-dir', default=None,
+    run_parser.add_argument('--oss-fuzz-dir', type=Path, default=None,
                             help='Path to oss-fuzz directory (default: ${BUILD_DIR}/crs/oss-fuzz)')
-    run_parser.add_argument('--registry-dir',
+    run_parser.add_argument('--registry-dir', type=Path,
                             help='Path to local oss-crs-registry directory')
     run_parser.add_argument('--engine', default='libfuzzer',
                             help='Fuzzing engine (default: libfuzzer)')
@@ -70,11 +70,11 @@ def main():
                             help='Sanitizer (default: address)')
     run_parser.add_argument('--architecture', default='x86_64',
                             help='Architecture (default: x86_64)')
-    run_parser.add_argument('--hints',
+    run_parser.add_argument('--hints', type=Path,
                             help='Directory containing hints (SARIF reports and corpus)')
-    run_parser.add_argument('--harness-source',
+    run_parser.add_argument('--harness-source', type=Path,
                             help='Path to harness source file for analysis')
-    run_parser.add_argument('--diff',
+    run_parser.add_argument('--diff', type=Path,
                             help='Path to diff file for analysis')
     run_parser.add_argument('--external-litellm', action='store_true',
                             help='Use external LiteLLM instance (requires LITELLM_URL and LITELLM_KEY env vars)')
@@ -85,64 +85,75 @@ def main():
         parser.print_help()
         return 1
 
+    # Resolve all paths immediately after parsing
+    config_dir = args.config_dir.resolve()
+    build_dir = args.build_dir.resolve()
+
     # Ensure build_dir exists
-    build_dir = Path(args.build_dir)
     if not build_dir.exists():
         logging.info(f"Creating build directory: {build_dir}")
         build_dir.mkdir(parents=True, exist_ok=True)
 
-
-    # Ensure oss-fuzz directory exists
+    # Resolve oss-fuzz directory
     if args.oss_fuzz_dir is None:
-        oss_fuzz_dir = Path(args.build_dir) / "crs" / "oss-fuzz"
+        oss_fuzz_dir = (build_dir / "crs" / "oss-fuzz").resolve()
     else:
-        oss_fuzz_dir = Path(args.oss_fuzz_dir)
+        oss_fuzz_dir = args.oss_fuzz_dir.resolve()
 
-    # Validate paths for run command
+    # Resolve optional paths for build command
+    source_path = args.source_path.resolve() if hasattr(args, 'source_path') and args.source_path else None
+    project_path = args.project_path.resolve() if hasattr(args, 'project_path') and args.project_path else None
+    registry_dir = args.registry_dir.resolve() if args.registry_dir else None
+
+    # Resolve and validate paths for run command
     if args.command == 'run':
-        if args.hints and not Path(args.hints).exists():
-            logging.error(f"Hints directory does not exist: {args.hints}")
+        hints_dir = args.hints.resolve() if args.hints else None
+        harness_source = args.harness_source.resolve() if args.harness_source else None
+        diff_path = args.diff.resolve() if args.diff else None
+
+        if hints_dir and not hints_dir.exists():
+            logging.error(f"Hints directory does not exist: {hints_dir}")
             return 1
-        if args.harness_source and not Path(args.harness_source).exists():
-            logging.error(f"Harness source file does not exist: {args.harness_source}")
+        if harness_source and not harness_source.exists():
+            logging.error(f"Harness source file does not exist: {harness_source}")
             return 1
-        if args.diff and not Path(args.diff).exists():
-            logging.error(f"Diff file does not exist: {args.diff}")
+        if diff_path and not diff_path.exists():
+            logging.error(f"Diff file does not exist: {diff_path}")
             return 1
 
     if args.command == 'build':
         result = build_crs(
-            config_dir=args.config_dir,
+            config_dir=config_dir,
             project_name=args.project,
-            oss_fuzz_dir=str(oss_fuzz_dir),
-            build_dir=args.build_dir,
+            oss_fuzz_dir=oss_fuzz_dir,
+            build_dir=build_dir,
             engine=args.engine,
             sanitizer=args.sanitizer,
             architecture=args.architecture,
-            source_path=args.source_path,
-            project_path=args.project_path,
+            source_path=source_path,
+            project_path=project_path,
             overwrite=args.overwrite,
             clone=args.clone,
-            registry_dir=args.registry_dir,
+            registry_dir=registry_dir,
             project_image_prefix=args.project_image_prefix,
             external_litellm=args.external_litellm
         )
     elif args.command == 'run':
         result = run_crs(
-            config_dir=args.config_dir,
+            config_dir=config_dir,
             project_name=args.project,
             fuzzer_name=args.fuzzer_name,
             fuzzer_args=args.fuzzer_args,
-            oss_fuzz_dir=str(oss_fuzz_dir),
-            build_dir=args.build_dir,
+            oss_fuzz_dir=oss_fuzz_dir,
+            build_dir=build_dir,
             worker=args.worker,
             engine=args.engine,
             sanitizer=args.sanitizer,
             architecture=args.architecture,
-            registry_dir=args.registry_dir,
-            hints_dir=args.hints,
-            harness_source=args.harness_source,
-            diff_path=args.diff,
+            registry_dir=registry_dir,
+            hints_dir=hints_dir,
+            harness_source=harness_source,
+            diff_path=diff_path,
             external_litellm=args.external_litellm
         )
     else:

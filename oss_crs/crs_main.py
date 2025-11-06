@@ -31,7 +31,7 @@ def _get_command_string(command):
     return ' '.join(shlex.quote(part) for part in command)
 
 
-def _verify_external_litellm(config_dir):
+def _verify_external_litellm(config_dir: Path) -> bool:
     """Verifies LiteLLM environment variables."""
     def keys_in_dict(keys, dict_):
         return all(key in dict_ for key in keys)
@@ -40,7 +40,7 @@ def _verify_external_litellm(config_dir):
     if keys_in_dict(keys, os.environ):
         return True
 
-    dotenv_path = Path(config_dir) / ".env"
+    dotenv_path = config_dir / ".env"
     if dotenv_path.is_file():
         dotenv_dict = dotenv_values(str(dotenv_path))
         if keys_in_dict(keys, dotenv_dict):
@@ -49,7 +49,7 @@ def _verify_external_litellm(config_dir):
     return False
 
 
-def _build_project_image(project_name, oss_fuzz_dir, architecture):
+def _build_project_image(project_name: str, oss_fuzz_dir: Path, architecture: str) -> bool:
     build_image_cmd = [
         'python3', 'infra/helper.py',
         'build_image',
@@ -65,14 +65,14 @@ def _build_project_image(project_name, oss_fuzz_dir, architecture):
     return True
 
 
-def _save_parent_image_tarballs(crs_list, project_name, build_dir, project_image_prefix):
+def _save_parent_image_tarballs(crs_list: list, project_name: str, build_dir: Path, project_image_prefix: str):
     """
     Save parent image tarballs for CRS that need dind.
 
     Args:
         crs_list: List of CRS configurations with 'name' and 'dind' keys
         project_name: Name of the project
-        build_dir: Path to build directory
+        build_dir: Path to build directory (already resolved)
         project_image_prefix: Prefix for project images (e.g., gcr.io/oss-fuzz)
 
     Returns:
@@ -84,7 +84,7 @@ def _save_parent_image_tarballs(crs_list, project_name, build_dir, project_image
         return None
 
     # Create parent-images directory
-    parent_images_dir = Path(build_dir) / 'crs' / 'parent-images'
+    parent_images_dir = build_dir / 'crs' / 'parent-images'
     parent_images_dir.mkdir(parents=True, exist_ok=True)
 
     # Parent image name
@@ -107,8 +107,8 @@ def _save_parent_image_tarballs(crs_list, project_name, build_dir, project_image
     return str(parent_images_dir)
 
 
-def _clone_oss_fuzz_if_needed(oss_fuzz_dir):
-    if not Path(oss_fuzz_dir).exists():
+def _clone_oss_fuzz_if_needed(oss_fuzz_dir: Path) -> None:
+    if not oss_fuzz_dir.exists():
         logging.info(f"Cloning oss-fuzz to: {oss_fuzz_dir}")
         try:
             subprocess.check_call([
@@ -121,20 +121,20 @@ def _clone_oss_fuzz_if_needed(oss_fuzz_dir):
     return True
 
 
-def _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
+def _validate_crs_modes(config_dir: Path, worker: str, registry_dir: Path, diff_path: Path) -> bool:
     """
     Validate that CRS mode requirements match the provided diff_path.
 
     Args:
-        config_dir: Directory containing CRS configuration files
+        config_dir: Directory containing CRS configuration files (already resolved)
         worker: Worker name
-        registry_dir: Path to oss-crs-registry directory
+        registry_dir: Path to oss-crs-registry directory (already resolved)
         diff_path: Path to diff file (or None)
 
     Returns:
         bool: True if validation passes, False otherwise
     """
-    config_resource_path = Path(config_dir) / 'config-resource.yaml'
+    config_resource_path = config_dir / 'config-resource.yaml'
     if not config_resource_path.exists():
         logger.error(f"config-resource.yaml not found: {config_resource_path}")
         return False
@@ -150,7 +150,7 @@ def _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
 
     # Determine registry path
     if registry_dir:
-        oss_crs_registry_path = Path(registry_dir).resolve()
+        oss_crs_registry_path = registry_dir
     else:
         # Use default location
         oss_crs_registry_path = Path(__file__).parent.parent / 'oss-crs-registry'
@@ -205,19 +205,19 @@ def _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
     return True
 
 
-def _clone_project_source(project_name, oss_fuzz_dir, build_dir):
+def _clone_project_source(project_name: str, oss_fuzz_dir: Path, build_dir: Path) -> bool:
     """
     Clone project source based on main_repo in project.yaml.
 
     Args:
         project_name: Name of the project
-        oss_fuzz_dir: Path to OSS-Fuzz root directory
-        build_dir: Path to build directory
+        oss_fuzz_dir: Path to OSS-Fuzz root directory (already resolved)
+        build_dir: Path to build directory (already resolved)
 
     Returns:
         bool: True if successful, False otherwise
     """
-    project_yaml_path = Path(oss_fuzz_dir) / 'projects' / project_name / 'project.yaml'
+    project_yaml_path = oss_fuzz_dir / 'projects' / project_name / 'project.yaml'
 
     # Validate project.yaml exists
     if not project_yaml_path.exists():
@@ -238,7 +238,7 @@ def _clone_project_source(project_name, oss_fuzz_dir, build_dir):
         return False
 
     # Clone to build/src/{project_name}
-    clone_dest = Path(build_dir) / 'src' / project_name
+    clone_dest = build_dir / 'src' / project_name
 
     if clone_dest.exists():
         logger.info(f"Source already exists at {clone_dest}, skipping clone")
@@ -264,30 +264,30 @@ def _clone_project_source(project_name, oss_fuzz_dir, build_dir):
         return False
 
 
-def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
-              engine='libfuzzer', sanitizer='address',
-              architecture='x86_64', source_path=None,
-              project_path=None, overwrite=False, clone=False,
-              check_project_fn=None,
-              registry_dir=None, project_image_prefix='gcr.io/oss-fuzz',
-              external_litellm=False):
+def build_crs(config_dir: Path, project_name: str, oss_fuzz_dir: Path, build_dir: Path,
+              engine: str = 'libfuzzer', sanitizer: str = 'address',
+              architecture: str = 'x86_64', source_path: Path = None,
+              project_path: Path = None, overwrite: bool = False, clone: bool = False,
+              check_project_fn = None,
+              registry_dir: Path = None, project_image_prefix: str = 'gcr.io/oss-fuzz',
+              external_litellm: bool = False):
     """
     Build CRS for a project using docker compose.
 
     Args:
-        config_dir: Directory containing CRS configuration files
+        config_dir: Directory containing CRS configuration files (Path, already resolved)
         project_name: Name of the OSS-Fuzz project
-        oss_fuzz_dir: Path to OSS-Fuzz root directory
-        build_dir: Path to build directory
+        oss_fuzz_dir: Path to OSS-Fuzz root directory (Path, already resolved)
+        build_dir: Path to build directory (Path, already resolved)
         engine: Fuzzing engine (default: libfuzzer)
         sanitizer: Sanitizer to use (default: address)
         architecture: Architecture (default: x86_64)
-        source_path: Optional path to local source
-        project_path: Optional path to local OSS-compatible project
+        source_path: Optional path to local source (Path, already resolved)
+        project_path: Optional path to local OSS-compatible project (Path, already resolved)
         overwrite: Overwrite existing project in oss-fuzz/projects/ (default: False)
         clone: Clone project source from main_repo in project.yaml (default: False)
         check_project_fn: Optional function to check if project exists
-        registry_dir: Optional path to local oss-crs-registry directory
+        registry_dir: Optional path to local oss-crs-registry directory (Path, already resolved)
         project_image_prefix: Project image prefix (default: gcr.io/oss-fuzz)
         external_litellm: Use external LiteLLM instance (default: False)
 
@@ -312,21 +312,19 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
 
     # Copy project_path to oss-fuzz/projects/{project_name} if provided
     if project_path:
-        src_path = Path(project_path).resolve()
-
-        # Validate source project path
-        if not src_path.exists():
-            logger.error(f"Project path does not exist: {src_path}")
+        # Validate source project path (already resolved)
+        if not project_path.exists():
+            logger.error(f"Project path does not exist: {project_path}")
             return False
-        if not src_path.is_dir():
-            logger.error(f"Project path is not a directory: {src_path}")
+        if not project_path.is_dir():
+            logger.error(f"Project path is not a directory: {project_path}")
             return False
-        if not (src_path / 'project.yaml').exists():
-            logger.error(f"project.yaml not found in: {src_path}")
+        if not (project_path / 'project.yaml').exists():
+            logger.error(f"project.yaml not found in: {project_path}")
             return False
 
         # Destination path (handles nested names like aixcc/c/project)
-        dest_path = Path(oss_fuzz_dir) / 'projects' / project_name
+        dest_path = oss_fuzz_dir / 'projects' / project_name
 
         # Check if destination exists
         if dest_path.exists():
@@ -343,8 +341,8 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Copy project to oss-fuzz projects directory
-        logger.info(f"Copying project from {src_path} to {dest_path}")
-        shutil.copytree(src_path, dest_path)
+        logger.info(f"Copying project from {project_path} to {dest_path}")
+        shutil.copytree(project_path, dest_path)
         logger.info(f"Successfully copied project to {dest_path}")
 
     # Clone project source if requested
@@ -354,38 +352,33 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
         if not _clone_project_source(project_name, oss_fuzz_dir, build_dir):
             return False
         # Use cloned source as source_path
-        source_path = str(Path(build_dir) / 'src' / project_name)
+        source_path = build_dir / 'src' / project_name
         logger.info(f"Using cloned source as source_path: {source_path}")
 
     # Build project image
     _build_project_image(project_name, oss_fuzz_dir, architecture)
 
-    # Resolve registry_dir if provided
-    oss_crs_registry_path = None
-    if registry_dir:
-        oss_crs_registry_path = str(Path(registry_dir).resolve())
-
     # Compute source_tag for image versioning if source_path provided
     source_tag = None
-    abs_source_path = None
+    source_path_str = None
     if source_path:
-        abs_source_path = _get_absolute_path(source_path)
-        source_tag = hashlib.sha256(abs_source_path.encode() + project_name.encode()).hexdigest()[:12]
+        source_path_str = str(source_path)
+        source_tag = hashlib.sha256(source_path_str.encode() + project_name.encode()).hexdigest()[:12]
         logger.info('Using source tag for image versioning: %s', source_tag)
 
     # Generate compose files using render_compose module
     logger.info('Generating compose-build.yaml')
     try:
         build_profiles, config_hash, crs_build_dir, crs_list = render_compose.render_build_compose(
-            config_dir=config_dir,
-            build_dir=build_dir,
-            oss_fuzz_dir=oss_fuzz_dir,
+            config_dir=str(config_dir),
+            build_dir=str(build_dir),
+            oss_fuzz_dir=str(oss_fuzz_dir),
             project=project_name,
             engine=engine,
             sanitizer=sanitizer,
             architecture=architecture,
-            registry_dir=oss_crs_registry_path,
-            source_path=abs_source_path,
+            registry_dir=str(registry_dir) if registry_dir else None,
+            source_path=source_path_str,
             project_image_prefix=project_image_prefix,
             external_litellm=external_litellm
         )
@@ -560,33 +553,34 @@ def build_crs(config_dir, project_name, oss_fuzz_dir, build_dir,
     return True
 
 
-def run_crs(config_dir, project_name, fuzzer_name, fuzzer_args,
-            oss_fuzz_dir, build_dir, worker='local',
-            engine='libfuzzer', sanitizer='address',
-            architecture='x86_64', check_project_fn=None,
-            registry_dir=None,
-            hints_dir=None,
-            harness_source=None,
-            diff_path=None,
-            external_litellm=False):
+def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: list,
+            oss_fuzz_dir: Path, build_dir: Path, worker: str = 'local',
+            engine: str = 'libfuzzer', sanitizer: str = 'address',
+            architecture: str = 'x86_64', check_project_fn = None,
+            registry_dir: Path = None,
+            hints_dir: Path = None,
+            harness_source: Path = None,
+            diff_path: Path = None,
+            external_litellm: bool = False):
     """
     Run CRS using docker compose.
 
     Args:
-        config_dir: Directory containing CRS configuration files
+        config_dir: Directory containing CRS configuration files (Path, already resolved)
         project_name: Name of the OSS-Fuzz project
         fuzzer_name: Name of the fuzzer to run
         fuzzer_args: Arguments to pass to the fuzzer
-        oss_fuzz_dir: Path to OSS-Fuzz root directory
-        build_dir: Path to build directory
+        oss_fuzz_dir: Path to OSS-Fuzz root directory (Path, already resolved)
+        build_dir: Path to build directory (Path, already resolved)
         worker: Worker name to run CRS on (default: local)
         engine: Fuzzing engine (default: libfuzzer)
         sanitizer: Sanitizer to use (default: address)
         architecture: Architecture (default: x86_64)
         check_project_fn: Optional function to check if project exists
-        registry_dir: Optional path to local oss-crs-registry directory
-        hints_dir: Optional directory containing hints (SARIF and corpus)
-        harness_source: Optional path to harness source file (will be mounted to container)
+        registry_dir: Optional path to local oss-crs-registry directory (Path, already resolved)
+        hints_dir: Optional directory containing hints (SARIF and corpus) (Path, already resolved)
+        harness_source: Optional path to harness source file (Path, already resolved)
+        diff_path: Optional path to diff file (Path, already resolved)
         external_litellm: Use external LiteLLM instance (default: False)
 
     Returns:
@@ -607,28 +601,23 @@ def run_crs(config_dir, project_name, fuzzer_name, fuzzer_args,
     if not _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
         return False
 
-    # Resolve registry_dir if provided
-    oss_crs_registry_path = None
-    if registry_dir:
-        oss_crs_registry_path = str(Path(registry_dir).resolve())
-
     # Generate compose files using render_compose module
     logger.info('Generating compose-%s.yaml', worker)
     fuzzer_command = [fuzzer_name] + fuzzer_args
     try:
         config_hash, crs_build_dir = render_compose.render_run_compose(
-            config_dir=config_dir,
-            build_dir=build_dir,
-            oss_fuzz_dir=oss_fuzz_dir,
+            config_dir=str(config_dir),
+            build_dir=str(build_dir),
+            oss_fuzz_dir=str(oss_fuzz_dir),
             project=project_name,
             engine=engine,
             sanitizer=sanitizer,
             architecture=architecture,
-            registry_dir=oss_crs_registry_path,
+            registry_dir=str(registry_dir) if registry_dir else None,
             worker=worker,
             fuzzer_command=fuzzer_command,
-            harness_source=harness_source,
-            diff_path=diff_path,
+            harness_source=str(harness_source) if harness_source else None,
+            diff_path=str(diff_path) if diff_path else None,
             external_litellm=external_litellm
         )
         crs_build_dir = Path(crs_build_dir)
