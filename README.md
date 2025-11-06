@@ -93,11 +93,112 @@ The run test script automatically:
 
 ## Options
 
-### External LiteLLM Proxy
+### Build Directory (`--build-dir`)
 
-As an alternative to the default behaviour of deploying a LiteLLM proxy along with the CRSs,
-the `--external-litellm` instead forwards the operator provided LiteLLM URL and key
-to the CRSs.
+Specify a custom build directory for CRS artifacts. Defaults to `./build` in the current directory.
+
+The build directory contains:
+- `crs/` - CRS Docker images and configuration
+- `crs/oss-fuzz/` - OSS-Fuzz repository (cloned automatically if needed)
+- `out/` - Build outputs and fuzzing results
+- `src/` - Cloned project sources (when using `--clone`)
+- `crs/parent-images/` - Parent image tarballs for Docker-in-Docker CRSs
+
+```bash
+# Use custom build directory
+uv run oss-crs build --build-dir /tmp/my-builds \
+                     example_configs/ensemble-c \
+                     json-c
+
+# Run must use the same build directory
+uv run oss-crs run --build-dir /tmp/my-builds \
+                   example_configs/ensemble-c \
+                   json-c \
+                   json_array_fuzzer
+```
+
+**Note:** Both `build` and `run` commands must use the same `--build-dir` to share built artifacts.
+
+### OSS-Fuzz Directory (`--oss-fuzz-dir`)
+
+Specify a custom OSS-Fuzz repository location. Defaults to `${BUILD_DIR}/crs/oss-fuzz`.
+
+Useful when:
+- Using a forked or customized OSS-Fuzz repository
+- Working with AIxCC or other OSS-Fuzz variants
+- Managing multiple OSS-Fuzz instances
+
+```bash
+# Use custom OSS-Fuzz directory
+uv run oss-crs build --oss-fuzz-dir ~/my-oss-fuzz \
+                     example_configs/crs-libfuzzer \
+                     json-c
+
+# For AIxCC with custom project image prefix
+uv run oss-crs build --oss-fuzz-dir oss-fuzz-aixcc \
+                     --project-image-prefix aixcc-afc \
+                     example_configs/crs-libfuzzer \
+                     aixcc/c/asc-nginx \
+                     ~/aixcc/oss-fuzz/clone/cp-user-nginx-asc-source
+
+uv run oss-crs run --oss-fuzz-dir oss-fuzz-aixcc \
+                   example_configs/crs-libfuzzer \
+                   aixcc/c/asc-nginx \
+                   pov_harness
+```
+
+**Note:**
+- If the OSS-Fuzz directory doesn't exist, it will be cloned from https://github.com/google/oss-fuzz
+- Use `--project-image-prefix` when working with non-standard OSS-Fuzz forks (e.g., AIxCC uses `aixcc-afc` instead of `gcr.io/oss-fuzz`)
+
+### CRS Registry Directory (`--registry-dir`)
+
+Specify a custom CRS registry directory. Defaults to the bundled `oss-crs-registry` in the package parent directory.
+
+The registry contains:
+- CRS metadata (`pkg.yaml` for each CRS)
+- CRS source references (git URL + ref, or local path)
+- CRS type and mode information
+
+```bash
+# Use custom registry
+uv run oss-crs build --registry-dir ~/my-crs-registry \
+                     example_configs/atlantis-c-libafl \
+                     json-c
+
+# Registry with local CRS development
+uv run oss-crs build --registry-dir ./local-registry \
+                     example_configs/my-custom-crs \
+                     test-project
+```
+
+**Registry Structure:**
+```
+oss-crs-registry/
+└── crs/
+    ├── atlantis-c-libafl/
+    │   └── pkg.yaml
+    ├── crs-libfuzzer/
+    │   └── pkg.yaml
+    └── my-custom-crs/
+        └── pkg.yaml
+```
+
+**Using `local_path` in `pkg.yaml`:**
+
+In the registry, the `local_path` key is supported as an alternative to `url` and `ref` for local CRS development:
+
+```yaml
+# pkg.yaml
+name: atlantis-c-libafl
+type: bug-finding
+source:
+  local_path: ~/dev/atlantis-c-libafl  # Use local path instead of git URL
+```
+
+### External LiteLLM Proxy (`--external-litellm`)
+
+Use an external LiteLLM proxy instead of deploying one alongside the CRSs.
 
 The operator must set up the environment variables `LITELLM_URL` and `LITELLM_KEY`
 either in the process environment or in `CONFIG_DIR/.env`.
@@ -107,25 +208,6 @@ export LITELLM_URL=https://my-litellm-proxy:4000
 export LITELLM_KEY=sk-litellm-virtual-key
 uv run oss-crs build --external-litellm example_configs/atlantis-c-libafl json-c
 uv run oss-crs run --external-litellm example_configs/atlantis-c-libafl json-c json_array_fuzzer
-```
-
-### Custom CRS registry
-
-Provide the path to the custom registry with `--registry-dir`.
-
-```bash
-uv run oss-crs build --registry-dir oss-crs-registry \
-                     example_configs/atlantis-c-libafl \
-                     json-c
-```
-
-In the registry, the key `local_path` is supported as an alternative to `url` and `ref`.
-
-```yaml pkg.yaml
-name: atlantis-c-libafl
-type: bug-finding
-source:
-  local_path: ~/atlantis-c-libafl
 ```
 
 ### Custom project path
@@ -185,26 +267,6 @@ uv run oss-crs build --clone \
 - `--clone` and `source_path` are mutually exclusive
 - Standard OSS-Fuzz projects already clone source in their Dockerfile, so `--clone` is not needed for them
 - The `project.yaml` must contain a `main_repo` field with a valid git URL
-
-### Custom OSS-Fuzz directory
-
-Provide the path to the custom OSS-Fuzz repository with `--oss-fuzz-dir`.
-In case the project image is built with a different prefix than `gcr.io/oss-fuzz`
-(e.g. for AIxCC, the prefix is `aixcc-afc`),
-then use the `--project-image-prefix` for the build command.
-
-```bash
-uv run oss-crs build --oss-fuzz-dir oss-fuzz-aixcc \
-                     --project-image-prefix aixcc-afc \
-                     example_configs/crs-libfuzzer \
-                     aixcc/c/asc-nginx \
-                     ~/aixcc/oss-fuzz/clone/cp-user-nginx-asc-source
-
-uv run oss-crs run --oss-fuzz-dir oss-fuzz-aixcc \
-                   example_configs/crs-libfuzzer \
-                   aixcc/c/asc-nginx \
-                   pov_harness
-```
 
 ## Supported CRSs
 
