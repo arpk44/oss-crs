@@ -104,6 +104,7 @@ services:
       - CPUSET_CPUS={{ crs.cpuset }}
       - MEMORY_LIMIT={{ crs.memory_limit | string }}
       - CRS_TARGET={{ project }}
+      - CRS_NAME={{ crs.name }}
 {{ crs_network() }}
     build:
       context: {{ crs.path }}
