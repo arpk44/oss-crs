@@ -94,11 +94,11 @@ def main():
         logging.info(f"Creating build directory: {build_dir}")
         build_dir.mkdir(parents=True, exist_ok=True)
 
-    # Resolve oss-fuzz directory
-    if args.oss_fuzz_dir is None:
-        oss_fuzz_dir = (build_dir / "crs" / "oss-fuzz").resolve()
-    else:
-        oss_fuzz_dir = args.oss_fuzz_dir.resolve()
+    # Always use standard oss-fuzz directory location
+    oss_fuzz_dir = (build_dir / "crs" / "oss-fuzz").resolve()
+
+    # Resolve source oss-fuzz directory if provided (for copying)
+    source_oss_fuzz_dir = args.oss_fuzz_dir.resolve() if args.oss_fuzz_dir else None
 
     # Resolve optional paths for build command
     source_path = args.source_path.resolve() if hasattr(args, 'source_path') and args.source_path else None
@@ -136,7 +136,8 @@ def main():
             clone=args.clone,
             registry_dir=registry_dir,
             project_image_prefix=args.project_image_prefix,
-            external_litellm=args.external_litellm
+            external_litellm=args.external_litellm,
+            source_oss_fuzz_dir=source_oss_fuzz_dir
         )
     elif args.command == 'run':
         result = run_crs(
@@ -154,7 +155,8 @@ def main():
             hints_dir=hints_dir,
             harness_source=harness_source,
             diff_path=diff_path,
-            external_litellm=args.external_litellm
+            external_litellm=args.external_litellm,
+            source_oss_fuzz_dir=source_oss_fuzz_dir
         )
     else:
         parser.print_help()

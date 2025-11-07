@@ -107,18 +107,53 @@ def _save_parent_image_tarballs(crs_list: list, project_name: str, build_dir: Pa
     return str(parent_images_dir)
 
 
-def _clone_oss_fuzz_if_needed(oss_fuzz_dir: Path) -> None:
-    if not oss_fuzz_dir.exists():
-        logging.info(f"Cloning oss-fuzz to: {oss_fuzz_dir}")
-        try:
-            subprocess.check_call([
-                'git', 'clone', 'https://github.com/google/oss-fuzz',
-                str(oss_fuzz_dir)
-            ])
-        except subprocess.CalledProcessError:
-            logging.error("Failed to clone oss-fuzz repository")
+def _clone_oss_fuzz_if_needed(oss_fuzz_dir: Path, source_oss_fuzz_dir: Path = None) -> bool:
+    """
+    Clone or copy OSS-Fuzz to the standard location if needed.
+
+    Args:
+        oss_fuzz_dir: Destination directory for OSS-Fuzz (standard location)
+        source_oss_fuzz_dir: Optional source directory to copy from
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    # If already exists, skip (don't overwrite)
+    if oss_fuzz_dir.exists():
+        logging.info(f"OSS-Fuzz directory already exists: {oss_fuzz_dir}")
+        return True
+
+    # If source directory provided, copy from it
+    if source_oss_fuzz_dir:
+        if not source_oss_fuzz_dir.exists():
+            logging.error(f"Source OSS-Fuzz directory does not exist: {source_oss_fuzz_dir}")
             return False
-    return True
+
+        logging.info(f"Copying OSS-Fuzz from {source_oss_fuzz_dir} to {oss_fuzz_dir}")
+        try:
+            # Create parent directory if needed
+            oss_fuzz_dir.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source_oss_fuzz_dir, oss_fuzz_dir)
+            logging.info(f"Successfully copied OSS-Fuzz to {oss_fuzz_dir}")
+            return True
+        except Exception as e:
+            logging.error(f"Failed to copy OSS-Fuzz directory: {e}")
+            return False
+
+    # Otherwise, clone from GitHub
+    logging.info(f"Cloning oss-fuzz to: {oss_fuzz_dir}")
+    try:
+        # Create parent directory if needed
+        oss_fuzz_dir.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.check_call([
+            'git', 'clone', 'https://github.com/google/oss-fuzz',
+            str(oss_fuzz_dir)
+        ])
+        logging.info(f"Successfully cloned OSS-Fuzz to {oss_fuzz_dir}")
+        return True
+    except subprocess.CalledProcessError:
+        logging.error("Failed to clone oss-fuzz repository")
+        return False
 
 
 def _validate_crs_modes(config_dir: Path, worker: str, registry_dir: Path, diff_path: Path) -> bool:
@@ -270,7 +305,7 @@ def build_crs(config_dir: Path, project_name: str, oss_fuzz_dir: Path, build_dir
               project_path: Path = None, overwrite: bool = False, clone: bool = False,
               check_project_fn = None,
               registry_dir: Path = None, project_image_prefix: str = 'gcr.io/oss-fuzz',
-              external_litellm: bool = False):
+              external_litellm: bool = False, source_oss_fuzz_dir: Path = None):
     """
     Build CRS for a project using docker compose.
 
@@ -290,6 +325,7 @@ def build_crs(config_dir: Path, project_name: str, oss_fuzz_dir: Path, build_dir
         registry_dir: Optional path to local oss-crs-registry directory (Path, already resolved)
         project_image_prefix: Project image prefix (default: gcr.io/oss-fuzz)
         external_litellm: Use external LiteLLM instance (default: False)
+        source_oss_fuzz_dir: Optional source OSS-Fuzz directory to copy from (Path, already resolved)
 
     Returns:
         bool: True if successful, False otherwise
@@ -308,7 +344,8 @@ def build_crs(config_dir: Path, project_name: str, oss_fuzz_dir: Path, build_dir
         logger.error("LITELLM_URL or LITELLM_KEY is not provided in the environment")
         return False
 
-    _clone_oss_fuzz_if_needed(oss_fuzz_dir)
+    if not _clone_oss_fuzz_if_needed(oss_fuzz_dir, source_oss_fuzz_dir):
+        return False
 
     # Copy project_path to oss-fuzz/projects/{project_name} if provided
     if project_path:
@@ -329,21 +366,26 @@ def build_crs(config_dir: Path, project_name: str, oss_fuzz_dir: Path, build_dir
         # Check if destination exists
         if dest_path.exists():
             if not overwrite:
-                logger.error(
+                logger.warning(
                     f"Project already exists: {dest_path}. "
-                    f"Use --overwrite to replace it."
+                    f"Skipping copy. Use --overwrite to replace it."
                 )
-                return False
-            logger.info(f"Overwriting existing project at: {dest_path}")
-            shutil.rmtree(dest_path)
-
-        # Create parent directories for nested project names
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-
-        # Copy project to oss-fuzz projects directory
-        logger.info(f"Copying project from {project_path} to {dest_path}")
-        shutil.copytree(project_path, dest_path)
-        logger.info(f"Successfully copied project to {dest_path}")
+            else:
+                logger.info(f"Overwriting existing project at: {dest_path}")
+                shutil.rmtree(dest_path)
+                # Create parent directories for nested project names
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+                # Copy project to oss-fuzz projects directory
+                logger.info(f"Copying project from {project_path} to {dest_path}")
+                shutil.copytree(project_path, dest_path)
+                logger.info(f"Successfully copied project to {dest_path}")
+        else:
+            # Create parent directories for nested project names
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            # Copy project to oss-fuzz projects directory
+            logger.info(f"Copying project from {project_path} to {dest_path}")
+            shutil.copytree(project_path, dest_path)
+            logger.info(f"Successfully copied project to {dest_path}")
 
     # Clone project source if requested
     # Note: --clone is for custom projects that don't have source cloning in Dockerfile
@@ -561,7 +603,7 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
             hints_dir: Path = None,
             harness_source: Path = None,
             diff_path: Path = None,
-            external_litellm: bool = False):
+            external_litellm: bool = False, source_oss_fuzz_dir: Path = None):
     """
     Run CRS using docker compose.
 
@@ -582,6 +624,7 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
         harness_source: Optional path to harness source file (Path, already resolved)
         diff_path: Optional path to diff file (Path, already resolved)
         external_litellm: Use external LiteLLM instance (default: False)
+        source_oss_fuzz_dir: Optional source OSS-Fuzz directory to copy from (Path, already resolved)
 
     Returns:
         bool: True if successful, False otherwise
@@ -595,7 +638,8 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
         logger.error("LITELLM_URL or LITELLM_KEY is not provided in the environment")
         return False
 
-    _clone_oss_fuzz_if_needed(oss_fuzz_dir)
+    if not _clone_oss_fuzz_if_needed(oss_fuzz_dir, source_oss_fuzz_dir):
+        return False
 
     # Validate CRS modes against diff_path
     if not _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
