@@ -44,6 +44,11 @@ services:
       - {{ volume_name('keys_data', crs.name) }}:/keys/{{ crs.name }}
       - {{ config_dir }}:/config:ro
     command: ["python", "key_provisioner.py", "--config-dir", "/config", "--crs", "{{ crs.name }}"]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/keys/{{ crs.name }}/api_key"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
     # restart: on-failure:5
 
   # CRS Builder {{ loop.index }} - {{ crs.name }}
@@ -56,7 +61,7 @@ services:
 {%- endif %}
     depends_on:
       {{ crs.name }}_key_provisioner:
-        condition: service_started
+        condition: service_healthy
     environment:
 {{ litellm_url_env() }}
 {%- if crs.dind %}
