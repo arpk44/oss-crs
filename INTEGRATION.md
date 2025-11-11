@@ -40,15 +40,55 @@ such as LLM models, features, or resource requirements.
 ### pkg.yaml
 
 For the integration PR, use `source.url` and `source.ref`.
+```
+name: crs-libfuzzer
+type: bug-finding
+source:
+  url: https://github.com/Team-Atlanta/crs-libfuzzer
+  ref: main
+```
+
 For local debugging, `source.local_path` can specify an absolute path to the CRS directory
 so that CRS developers do not have to update their remote repository for minute changes.
+```
+name: crs-libfuzzer
+type: bug-finding
+source:
+  local_path: ~/crs-libfuzzer
+```
 
 ### config-crs.yaml
 
 Specify constraints and dependencies for the CRS in this file.
 The specified LLM models will be included in the LiteLLM provisioned key during deployment.
 `ncpu` and `ram` may specified for minimum resource requirements for the CRS.
+```
+atlantis-java-main:
+  models:
+    - gpt-5
+    - o4-mini
+    - o3
+    - gpt-4.1
+  ncpu: 1-all
+```
+
 If a multi-container deployment is required for the CRS, specify `dind` in `dependencies.
+```
+mock-dind:
+  dependencies:
+    - dind
+```
+
+The CRS can also restrict the modes it deploys in (i.e. full or delta).
+For example, the bullseye directed fuzzer should only be deployed in delta mode when a diff is provided.
+By default if `modes` is not specified, the CRS may be deployed in both full and delta modes.
+```
+atlantis-c-bullseye:
+  models:
+    - o3
+  modes:
+    - delta
+```
 
 ## CRS entrypoint
 
@@ -173,6 +213,12 @@ In order to access the project image for building the harnesses,
 it is provided as `/project-image.tar` inside the build container.
 
 The `mock-dind` CRS is provided as an example of the docker image exporting and loading workflow.
+
+### Delta mode
+
+In delta mode, when OSS-CRS is provided the `--diff` option, 
+the diff file will be mounted inside the container as `/ref.diff`.
+The CRS may assume the diff has already been applied to the source code.
 
 ## Operator configuration files
 
