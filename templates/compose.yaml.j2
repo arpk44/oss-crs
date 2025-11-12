@@ -59,6 +59,7 @@ services:
 {%- if crs.dind %}
     privileged: true
 {%- endif %}
+    shm_size: 2g
     depends_on:
       {{ crs.name }}_key_provisioner:
         condition: service_healthy
@@ -100,6 +101,7 @@ services:
   {{ crs.name }}_runner:
     image: {{ crs.name }}_runner
     privileged: true
+    shm_size: 2g
     environment:
 {{ litellm_url_env() }}
       - FUZZING_ENGINE={{ engine }}
