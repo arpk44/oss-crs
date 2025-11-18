@@ -139,7 +139,9 @@ def run_command(command: str, n: int = 5) -> None:
             else:
                 # Calculate how many terminal lines this logical line will occupy
                 # Add terminal_width - 1 to ensure we round up
-                total_display_lines += (len(line) + terminal_width - 1) // terminal_width
+                total_display_lines += (
+                    len(line) + terminal_width - 1
+                ) // terminal_width
         return total_display_lines
 
     # We use Popen to start the process non-blockingly and pipe its output
