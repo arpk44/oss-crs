@@ -9,6 +9,7 @@ import os
 from typing import Deque
 from collections import deque
 import sys
+import shutil
 
 
 def _docker_volume_exists(volume_name: str) -> bool:
@@ -121,6 +122,25 @@ def run_command(command: str, n: int = 5) -> None:
         0  # Tracks how many lines we previously printed to manage cursor
     )
 
+    # Get terminal width for calculating wrapped lines
+    terminal_width = shutil.get_terminal_size(fallback=(80, 24)).columns
+
+    def count_display_lines(text: str) -> int:
+        """Calculate how many terminal lines a string will occupy, accounting for wrapping."""
+        if not text:
+            return 0
+        # Each line in the text may wrap multiple times
+        lines = text.split(os.linesep)
+        total_display_lines = 0
+        for line in lines:
+            if len(line) == 0:
+                total_display_lines += 1
+            else:
+                # Calculate how many terminal lines this logical line will occupy
+                # Add terminal_width - 1 to ensure we round up
+                total_display_lines += (len(line) + terminal_width - 1) // terminal_width
+        return total_display_lines
+
     # We use Popen to start the process non-blockingly and pipe its output
     try:
         # Use Python's built-in stderr=STDOUT for robust output merging
@@ -160,8 +180,8 @@ def run_command(command: str, n: int = 5) -> None:
                     # Ensure the output is immediately shown on the console
                     sys.stdout.flush()
 
-                    # 4. Update the tracker
-                    lines_printed_count = len(recent_lines_buffer)
+                    # 4. Update the tracker with actual display line count
+                    lines_printed_count = count_display_lines(current_output)
 
         # Wait for the process to complete and get the return code
         process.wait()
