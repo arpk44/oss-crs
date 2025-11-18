@@ -18,6 +18,7 @@ from bug_fixing.src.oss_patch.globals import (
 
 logger = logging.getLogger(__name__)
 
+
 def _parse_pkg_yaml(yaml_path: Path) -> tuple[str, str]:
     with open(yaml_path) as f:
         yaml_data = yaml.safe_load(f)

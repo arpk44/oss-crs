@@ -7,6 +7,7 @@ from .oss_patch import OSSPatch
 
 logger = logging.getLogger(__name__)
 
+
 def _get_path_or_none(arg_str: str) -> Path | None:
     return Path(arg_str) if arg_str else None
 
@@ -32,6 +33,7 @@ def _setup_logger_config():
         format=CONCISE_LOG_FORMAT,  # Apply the custom format string
         datefmt=CUSTOM_DATE_FORMAT,  # Apply the custom date format
     )
+
 
 def main():  # pylint: disable=too-many-branches,too-many-return-statements
     """Gets subcommand from program arguments and does it. Returns 0 on success 1

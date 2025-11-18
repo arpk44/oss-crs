@@ -91,7 +91,7 @@ class OSSPatchCRSRunner:
             ]
         )
 
-        command = ' '.join(cmd_parts)
+        command = " ".join(cmd_parts)
         logger.info(f"Running: {command}")
 
         try:

@@ -10,6 +10,7 @@ from typing import Deque
 from collections import deque
 import sys
 
+
 def _docker_volume_exists(volume_name: str) -> bool:
     client = docker.from_env()
     try:
@@ -116,7 +117,9 @@ def run_command(command: str, n: int = 5) -> None:
     """
     # Use a deque (double-ended queue) with a maximum length of N.
     recent_lines_buffer: Deque[str] = deque(maxlen=n)
-    lines_printed_count = 0 # Tracks how many lines we previously printed to manage cursor
+    lines_printed_count = (
+        0  # Tracks how many lines we previously printed to manage cursor
+    )
 
     # We use Popen to start the process non-blockingly and pipe its output
     try:
@@ -127,14 +130,14 @@ def run_command(command: str, n: int = 5) -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1 # Line-buffered reading
+            bufsize=1,  # Line-buffered reading
         )
 
         print(f"--- Executing: '{command}' ---")
 
         # Read the output line by line in real-time
         if process.stdout:
-            for line in iter(process.stdout.readline, ''):
+            for line in iter(process.stdout.readline, ""):
                 clean_line = line.strip()
                 if clean_line:
                     # 1. Update the rolling buffer
@@ -143,7 +146,7 @@ def run_command(command: str, n: int = 5) -> None:
                     # 2. Clear previous output (move cursor up and clear lines)
                     # We move the cursor up by the number of lines we last printed.
                     if lines_printed_count > 0:
-                        sys.stdout.write('\033[1A\033[K' * lines_printed_count)
+                        sys.stdout.write("\033[1A\033[K" * lines_printed_count)
 
                     # 3. Print the new state of the buffer
                     current_output = os.linesep.join(list(recent_lines_buffer))
@@ -161,7 +164,7 @@ def run_command(command: str, n: int = 5) -> None:
 
         # Final cleanup - clear the rolling display
         if lines_printed_count > 0:
-            sys.stdout.write('\033[1A\033[K' * lines_printed_count)
+            sys.stdout.write("\033[1A\033[K" * lines_printed_count)
 
         if process.returncode != 0:
             # Print final error state

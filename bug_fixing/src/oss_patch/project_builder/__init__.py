@@ -260,7 +260,6 @@ class OSSPatchProjectBuilder:
 
         run_command(command)
 
-
     def prepare_docker_cache_builder(self) -> bool:
         if not docker_image_exists(OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE):
             logger.info(
