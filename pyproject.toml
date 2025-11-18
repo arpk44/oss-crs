@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "oss-bugfind-crs"
+name = "oss-crs"
 version = "0.1.0"
 description = "Cyber Reasoning System (CRS) build and run tools for bug finding"
 requires-python = ">=3.9"
@@ -16,10 +16,13 @@ dependencies = [
     "PyYAML>=6.0.3",
     "Jinja2>=3.1.6",
     "python-dotenv>=1.0.1",
+    "docker>=7.1.0",
+    "ruff>=0.14.5",
 ]
 
 [project.scripts]
 oss-bugfind-crs = "bug_finding.src.__main__:main"
+oss-bugfix-crs = "bug_fixing.src.__main__:main"
 
 [project.optional-dependencies]
 dev = [
@@ -28,7 +31,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["bug_finding", "bug_finding.src", "crs_registry"]
+packages = ["bug_finding", "bug_finding.src", "bug_fixing", "bug_fixing.src", "crs_registry"]
 
 [tool.setuptools.package-data]
 "bug_finding" = [
