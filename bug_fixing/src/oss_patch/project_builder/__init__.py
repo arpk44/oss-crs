@@ -269,7 +269,7 @@ class OSSPatchProjectBuilder:
                 logger.error(
                     f'Building "{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE}" has failed.'
                 )
-            return False
+                return False
 
         return True
 
