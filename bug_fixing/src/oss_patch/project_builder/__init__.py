@@ -126,16 +126,6 @@ def _build_docker_cache_builder_image() -> bool:
         return False
 
 
-def _parse_pkg_yaml(yaml_path: Path) -> tuple[str, str]:
-    with open(yaml_path) as f:
-        yaml_data = yaml.safe_load(f)
-
-    return (
-        yaml_data["source"]["url"],
-        yaml_data["source"]["ref"],
-    )
-
-
 class OSSPatchProjectBuilder:
     def __init__(
         self,
@@ -259,6 +249,7 @@ class OSSPatchProjectBuilder:
         )
 
         run_command(command)
+        return True
 
     def prepare_docker_cache_builder(self) -> bool:
         if not docker_image_exists(OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE):
@@ -378,13 +369,13 @@ class OSSPatchProjectBuilder:
         )
 
         try:
-            run_command(
+            command = (
                 f"docker build --tag {get_runner_image_name(self.project_name)} "
                 f"--build-arg target_project={self.project_name} "
                 f"--file {OSS_PATCH_RUNNER_DATA_PATH / 'Dockerfile'} "
-                f"{str(Path.cwd())}",
-                shell=True,
+                f"{str(Path.cwd())}"
             )
+            run_command(command)
             return True
         except subprocess.CalledProcessError:
             return False
