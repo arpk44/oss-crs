@@ -73,12 +73,11 @@ class OSSPatch:
         )
         if not project_builder.validate_arguments():
             return False
+        if not project_builder.prepare_docker_cache_builder():
+            return False
 
         with temp_build_context(OSS_PATCH_BUILD_CONTEXT_DIR):
             if not crs_builder.build_crs_image():
-                return False
-
-            if not project_builder.prepare_docker_cache_builder():
                 return False
 
             if not project_builder.copy_oss_fuzz_and_sources(
