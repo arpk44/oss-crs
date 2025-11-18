@@ -44,21 +44,21 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
 
     oss_patch = OSSPatch(args.crs, args.project)
 
-    if args.command == "build_crs":
+    if args.command == "build":
         result = oss_patch.build_crs(
-            _get_path_or_none(args.oss_fuzz),
+            Path(args.oss_fuzz),
             _get_path_or_none(args.project_path),
             _get_path_or_none(args.source_path),
             _get_path_or_none(args.local_crs),
         )
-    elif args.command == "run_crs":
+    elif args.command == "run":
         result = oss_patch.run_crs(
             args.harness,
-            _get_path_or_none(args.povs),
+            Path(args.povs),
             args.litellm_key,
             args.litellm_base,
             _get_path_or_none(args.hints),
-            _get_path_or_none(args.out),
+            Path(args.out),
         )
     else:
         # Print help string if no arguments provided.
@@ -84,9 +84,7 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    build_crs_parser = subparsers.add_parser(
-        "build_crs", aliases=["build"], help="Build CRS for a project."
-    )
+    build_crs_parser = subparsers.add_parser("build", help="Build CRS for a project.")
 
     build_crs_parser.add_argument("crs", help="name of the crs")
     build_crs_parser.add_argument(
@@ -97,7 +95,9 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
     #                               help='path of local source',
     #                               nargs='?')
     build_crs_parser.add_argument("--local-crs", help="path to local CRS source code")
-    build_crs_parser.add_argument("--oss-fuzz", help="path to OSS-Fuzz repository")
+    build_crs_parser.add_argument(
+        "--oss-fuzz", required=True, help="path to OSS-Fuzz repository"
+    )
     build_crs_parser.add_argument(
         "--project-path",
         help="Path to OSS-Fuzz compatible project directory "
@@ -115,9 +115,7 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
 
     build_crs_parser.set_defaults(clean=False)
 
-    run_crs_parser = subparsers.add_parser(
-        "run_crs", aliases=["run"], help="Run a patching CRS."
-    )
+    run_crs_parser = subparsers.add_parser("run", help="Run a patching CRS.")
     run_crs_parser.add_argument("crs", help="name of the crs")
     run_crs_parser.add_argument(
         "project", help="name of the project or path (external)"
@@ -127,16 +125,23 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
     # )
     run_crs_parser.add_argument(
         "--povs",
+        required=True,
         help="path to directory that contains a set of PoVs to generate patches",
     )
-    run_crs_parser.add_argument("--harness", help="name of the harness")
+    run_crs_parser.add_argument("--harness", required=True, help="name of the harness")
     # run_crs_parser.add_argument(
     #     "--harness-source", help="path to harness source file for analysis"
     # )
     run_crs_parser.add_argument("--hints", help="path to hint text file for the crs")
-    run_crs_parser.add_argument("--out", help="path to crs output directory")
-    run_crs_parser.add_argument("--litellm-base", help="address of litellm API base")
-    run_crs_parser.add_argument("--litellm-key", help="The API key for litellm")
+    run_crs_parser.add_argument(
+        "--out", required=True, help="path to crs output directory"
+    )
+    run_crs_parser.add_argument(
+        "--litellm-base", required=True, help="address of litellm API base"
+    )
+    run_crs_parser.add_argument(
+        "--litellm-key", required=True, help="The API key for litellm"
+    )
 
     # manage_crs_parser = subparsers.add_parser(
     #     "manage_crs", aliases=["manage"], help="Manage existing CRSes."

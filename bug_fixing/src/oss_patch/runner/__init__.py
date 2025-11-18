@@ -4,10 +4,7 @@ import shutil
 import yaml
 import base64
 import subprocess
-from bug_fixing.src.oss_patch.functions import (
-    get_runner_image_name,
-    run_command
-)
+from bug_fixing.src.oss_patch.functions import get_runner_image_name, run_command
 from bug_fixing.src.oss_patch.globals import (
     OSS_PATCH_CRS_SYSTEM_IMAGES,
     OSS_PATCH_CRS_DOCKER_ASSETS,
@@ -128,9 +125,11 @@ class OSSPatchCRSRunner:
         if hints_path:
             self._prepare_hints(hints_path)
 
-        logger.info(f"Now launching \"{self.crs_name}\"")
+        logger.info(f'Now launching "{self.crs_name}"')
         if not self._run_crs_against_povs(litellm_api_key, litellm_api_base):
             return False
 
-        logger.info(f"The CRS \"{self.crs_name}\" has run successfully. Check the \"{self.out_dir}\" for its outputs.")
+        logger.info(
+            f'The CRS "{self.crs_name}" has run successfully. Check the "{self.out_dir}" for its outputs.'
+        )
         return True

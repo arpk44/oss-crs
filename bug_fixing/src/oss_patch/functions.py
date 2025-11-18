@@ -17,10 +17,10 @@ def _docker_volume_exists(volume_name: str) -> bool:
         # Attempt to retrieve the volume
         client.volumes.get(volume_name)
         return True
-    except docker.errors.NotFound:
+    except docker.errors.NotFound:  # pyright: ignore[reportAttributeAccessIssue]
         # The NotFound exception is raised if the volume does not exist
         return False
-    except docker.errors.APIError as e:
+    except docker.errors.APIError as e:  # pyright: ignore[reportAttributeAccessIssue]
         # Handle other API errors (e.g., connection issue)
         return False
 
@@ -67,7 +67,7 @@ def docker_image_exists(image_name: str) -> bool:
     try:
         client.images.get(image_name)
         return True
-    except docker.errors.ImageNotFound:
+    except docker.errors.ImageNotFound:  # pyright: ignore[reportAttributeAccessIssue]
         return False
 
 

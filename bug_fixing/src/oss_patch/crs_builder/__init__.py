@@ -125,8 +125,8 @@ class OSSPatchCRSBuilder:
         return True
 
     def _build_crs_image_in_volume(self, config_yaml: Path, volume_name: str) -> bool:
-        assert self.crs_path.exists()
         assert config_yaml.exists()
+        assert self.crs_path and self.crs_path.exists()
 
         with open(config_yaml) as f:
             yaml_data = yaml.safe_load(f)
@@ -181,3 +181,5 @@ class OSSPatchCRSBuilder:
         logger.info("CRS build completed successfully!")
         logger.info(f"CRS image: {get_crs_image_name(self.crs_name)}")
         logger.info("=" * 60)
+
+        return True

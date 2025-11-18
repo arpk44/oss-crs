@@ -192,6 +192,8 @@ class OSSPatchProjectBuilder:
         self,
         dst_dir: Path,
     ) -> bool:
+        assert self.project_path
+
         logger.info("Copying OSS-Fuzz and target project's sources")
 
         if dst_dir.exists():
@@ -252,15 +254,17 @@ class OSSPatchProjectBuilder:
         return True
 
     def prepare_docker_cache_builder(self) -> bool:
-        if not docker_image_exists(OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE):
-            logger.info(
-                f'"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE}" does not exist. Build a new image...'
+        if docker_image_exists(OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE):
+            return True
+
+        logger.info(
+            f'"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE}" does not exist. Build a new image...'
+        )
+        if not _build_docker_cache_builder_image():
+            logger.error(
+                f'Building "{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE}" has failed.'
             )
-            if not _build_docker_cache_builder_image():
-                logger.error(
-                    f'Building "{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE}" has failed.'
-                )
-                return False
+            return False
 
         return True
 
@@ -333,10 +337,9 @@ class OSSPatchProjectBuilder:
             )
             return True
 
+        runner_container_name = f"oss-patch-{self.project_name.split('/')[-1]}-runner"
+
         try:
-            runner_container_name = (
-                f"oss-patch-{self.project_name.split('/')[-1]}-runner"
-            )
             if not self._build_runner_image():
                 logger.error("Building oss-patch runner image failed")
                 return False
@@ -477,9 +480,11 @@ class OSSPatchProjectBuilder:
             tmp_path = Path(tmp_dir)
 
             (tmp_path / "prepare_artifacts.sh").write_text(shell_script)
-            (tmp_path / "compile").write_text(
-                self._get_patched_compile_sh(self.oss_fuzz_path)
-            )
+
+            patched_compile = self._get_patched_compile_sh()
+            if not patched_compile:
+                return False
+            (tmp_path / "compile").write_text(patched_compile)
 
             runner_command = (
                 f"docker run "

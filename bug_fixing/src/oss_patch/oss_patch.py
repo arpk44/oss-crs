@@ -76,7 +76,7 @@ class OSSPatch:
         if not project_builder.prepare_docker_cache_builder():
             return False
 
-        with temp_build_context(OSS_PATCH_BUILD_CONTEXT_DIR):
+        with temp_build_context(str(OSS_PATCH_BUILD_CONTEXT_DIR)):
             if not crs_builder.build_crs_image():
                 return False
 
@@ -113,6 +113,6 @@ class OSSPatch:
             self.crs_name, self.project_name, self.work_dir, out_dir
         )
 
-        oss_patch_runner.run_crs_against_povs(
+        return oss_patch_runner.run_crs_against_povs(
             harness_name, povs_dir, litellm_api_key, litellm_api_base, hints_dir, "full"
         )
