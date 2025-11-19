@@ -111,17 +111,14 @@ class OSSPatchCRSBuilder:
         """Pull CRS repository"""
 
         crs_url, crs_ref = _parse_pkg_yaml(pkg_yaml_path)
-        if not run_command(f"git clone {crs_url} {self.crs_path}"):
-            return False
+        run_command(f"git clone {crs_url} {self.crs_path}")
         if crs_ref is not None:
-            if not run_command(f"git -C {self.crs_path} checkout {crs_ref}"):
-                return False
-
-        if not run_command(
+            run_command(f"git -C {self.crs_path} checkout {crs_ref}")
+            
+        run_command(
             f"git -C {self.crs_path} submodule update --init --recursive --depth 1"
-        ):
-            return False
-
+        )
+        
         return True
 
     def _build_crs_image_in_volume(self, config_yaml: Path, volume_name: str) -> bool:
