@@ -67,7 +67,7 @@ def _clone_project_repo(proj_yaml_path: Path, dst_path: Path) -> bool:
         f'Cloning the target project repository from "{yaml_data["main_repo"]}"...'
     )
 
-    clone_command = f"git clone {yaml_data['main_repo']} --depth 1 --shallow-submodules --recurse-submodules {dst_path}"
+    clone_command = f"git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
     # @TODO: how to properly handle `--shallow-submodules --recurse-submodules` options
 
     try:
@@ -174,8 +174,41 @@ class OSSPatchProjectBuilder:
 
         return True
 
-    def _cleanup_copy_dir(self, dir_path: Path):
-        shutil.rmtree(dir_path)
+    def _checkout_project_sources(self, dst_path: Path) -> bool:
+        aixcc_config_yaml_path = self.project_path / ".aixcc" / "config.yaml"
+
+        if not aixcc_config_yaml_path.exists():
+            # Don't have `.aixcc/config.yaml` directory, do nothing.
+            return True
+
+        with open(aixcc_config_yaml_path, 'r') as f:
+            aixcc_config_yaml = yaml.safe_load(f)
+
+        assert aixcc_config_yaml["full_mode"]
+        assert aixcc_config_yaml["full_mode"]["base_commit"]
+
+        command = f"git reset --hard {aixcc_config_yaml["full_mode"]["base_commit"]}"
+        try:
+            subprocess.check_call(command, shell=True, cwd=dst_path)
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error(f"`{command}` has failed... {e}")
+            return False
+
+    def _prepare_project_sources(self, dst_path: Path) -> bool:
+        assert self.project_path
+
+        # CP's source not provided, clone the remote repository
+        if not _clone_project_repo(
+            self.project_path / "project.yaml", dst_path
+        ):
+            logger.error("Cloning target project source code has failed.")
+            return False
+
+        if not self._checkout_project_sources(dst_path):
+            return False
+
+        return True
 
     def copy_oss_fuzz_and_sources(
         self,
@@ -197,10 +230,7 @@ class OSSPatchProjectBuilder:
             # copy existing CP's source
             shutil.copytree(self.source_path, cp_source_path)
         else:
-            # CP's source not provided, clone the remote repository
-            if not _clone_project_repo(
-                self.project_path / "project.yaml", cp_source_path
-            ):
+            if not self._prepare_project_sources(cp_source_path):
                 return False
 
         # copy the provided OSS-Fuzz source
