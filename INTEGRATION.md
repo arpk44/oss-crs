@@ -265,14 +265,25 @@ We separate the building phase so that CRS performance can be evaluated solely o
 
 * [NOTE]: Since we are on active development of the interfaces for OSS-PATCH. Cli argument details are subject to change.
 
-This is the example of running multi-retrieval, one of the agents included in ATLANTIS.
-```sh
-# build a particular CRS
-uv run oss-bugfix-crs build atlantis-multi-retrieval json-c
+This is the example of running 42-patch-agent (https://github.com/sslab-gatech/42-PatchAgent) under OSS-PATCH.
 
-# Run a particular CRS on a harness with the given PoVs
-uv run oss-bugfix-crs run atlantis-multi-retrieval json-c --povs ./povs --harness fuzz_process_input_header --litellm-base https://dummy.org --litellm-key sk-fake-key --out ./out
+```sh
+# Type `-h` to see the usage
+uv run oss-bugfix-crs build -h
+
+# build a particular CRS (for example, target project is `json-c` project)
+uv run oss-bugfix-crs build 42-patch-agent sqlite3 --oss-fuzz /path/to/oss-fuzz
+
+# Type `-h` to see the usage
+uv run oss-bugfix-crs run -h
+
+# Run a particular CRS on a harness with the provided raw PoVs (i.e., `/path/to/povs`)
+uv run oss-bugfix-crs run 42-patch-agent sqlite3 --povs /path/to/povs --harness fuzz_process_input_header --litellm-base https://dummy.org --litellm-key sk-fake-key --out ./out
 ```
+
+`/path/to/povs` contains the raw blob files (e.g., `pov_1.bin`, `pov_2.bin`, etc).
+We recommend using the OSS-Fuzz and benchmarks before the final competition (i.e., curl, sqlite, etc in round 3).
+
 
 ## How to register patching CRS to OSS-PATCH?
 
