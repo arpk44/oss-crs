@@ -12,6 +12,7 @@ from collections import deque
 import sys
 import shutil
 import logging
+import re
 
 logger = logging.getLogger()
 
@@ -87,7 +88,7 @@ def get_base_runner_image_name(oss_fuzz_path: Path) -> str:
 
 def get_builder_image_name(oss_fuzz_path: Path, project_name: str) -> str:
     dockerfile_path = oss_fuzz_path / "projects" / project_name / "Dockerfile"
-    assert dockerfile_path.exists()
+    assert dockerfile_path.exists(), f"{dockerfile_path} does not exist"
 
     # @TODO: we need to unify the build image name... (e.g., "ghcr.io/oss-fuzz", "aixcc-finals", "aixcc-afc", ...).
     # There are no standard ways to get the image name given the OSS-Fuzz and project name.
@@ -165,6 +166,9 @@ def run_command(command: str, n: int = 5) -> None:
         )
 
         print(f"--- Executing: '{command}' ---")
+        print(
+            f"=============================== COMMAND OUTPUT ==============================="
+        )
 
         # Read the output line by line in real-time
         if process.stdout:
@@ -200,6 +204,10 @@ def run_command(command: str, n: int = 5) -> None:
         if lines_printed_count > 0:
             sys.stdout.write(os.linesep)
             sys.stdout.flush()
+
+        print(
+            f"=============================================================================="
+        )
 
         if process.returncode != 0:
             # Print final error state
@@ -245,3 +253,13 @@ def prepare_docker_cache_builder() -> bool:
         return False
 
     return True
+
+
+def extract_sanitizer_report(full_log: str) -> str | None:
+    match = re.search(r"==\d+==", full_log)
+
+    if match is None:
+        # fail-safe: return the full crash log as it is.
+        return None
+
+    return full_log[match.start() :]
