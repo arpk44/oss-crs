@@ -70,20 +70,37 @@ def load_config(config_dir: Path) -> Dict[str, Any]:
 
 def parse_cpu_range(cpu_spec: str) -> List[int]:
     """
-    Parse CPU specification in format 'm-n' and return list of CPU cores.
+    Parse CPU specification and return list of CPU cores.
+
+    Supports multiple formats:
+    - Range: '0-7' → [0,1,2,3,4,5,6,7]
+    - List: '0,2,4,6' → [0,2,4,6]
+    - Single: '5' → [5]
+    - Mixed: '0-3,8,12-15' → [0,1,2,3,8,12,13,14,15]
 
     Args:
-      cpu_spec: CPU specification string (e.g., '0-7', '4-11')
+      cpu_spec: CPU specification string
 
     Returns:
-      List of CPU core numbers
+      List of CPU core numbers in ascending order
     """
-    if '-' in cpu_spec:
-        start, end = cpu_spec.split('-', 1)
-        return list(range(int(start), int(end) + 1))
-    else:
-        # Single core specified
-        return [int(cpu_spec)]
+    cpu_list = []
+
+    # Split by comma to handle comma-separated values
+    parts = cpu_spec.split(',')
+
+    for part in parts:
+        part = part.strip()
+        if '-' in part:
+            # Range format: '0-7'
+            start, end = part.split('-', 1)
+            cpu_list.extend(range(int(start), int(end) + 1))
+        else:
+            # Single core: '5'
+            cpu_list.append(int(part))
+
+    # Remove duplicates and sort
+    return sorted(set(cpu_list))
 
 
 def format_cpu_list(cpu_list: List[int]) -> str:
