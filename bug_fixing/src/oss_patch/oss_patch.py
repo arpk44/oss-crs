@@ -9,6 +9,7 @@ from .functions import (
     prepare_docker_cache_builder,
     extract_sanitizer_report,
     extract_java_exception_report,
+    get_builder_image_name,
 )
 import logging
 import time
@@ -181,9 +182,23 @@ class OSSPatch:
             project_path=project_path,
         )
 
-        project_builder.remove_builder_image()
-        project_builder.build(inc_build_enabled=False)
+        logger.info("Preparing project source code")
+        source_path = Path("/tmp/project-src")
+        subprocess.run("rm -rf /tmp/project-src", shell=True)
 
+        project_builder.prepare_project_sources(source_path)
+
+        logger.info(
+            f'create project builder image: "{get_builder_image_name(oss_fuzz_path, self.project_name)}"'
+        )
+        project_builder.remove_builder_image()
+        cur_time = time.time()
+        project_builder.build(inc_build_enabled=False)
+        image_build_time = time.time() - cur_time
+        logger.info(f"Docker image build time: {image_build_time}")
+
+        exit(-1)
+        logger.info("Measuring original build time without incremental build")
         # measure consumed time
         cur_time = time.time()
         result = project_builder.build_fuzzers()
@@ -191,9 +206,12 @@ class OSSPatch:
 
         if result:
             stdout, stderr = result
-            logger.error(f"build_fuzzers failed...")
-            print(str(stdout))
-            print(str(stderr))
+            logger.error(f"`build_fuzzers` failed... checkout log in `/tmp/build.log`")
+
+            with open("/tmp/build.log", "w") as f:
+                f.write(stdout.decode())
+                f.write(stderr.decode())
+
             return False
 
         logger.info(
@@ -207,16 +225,13 @@ class OSSPatch:
 
         # measure consumed time
         cur_time = time.time()
-        result = project_builder.build_fuzzers()
+        if project_builder.build_fuzzers():
+            return False
+
         build_time_with_inc_build = time.time() - cur_time
 
         logger.info(f"Build time with incremental build: {build_time_with_inc_build}")
 
-        source_path = Path("/tmp/project-src")
-
-        subprocess.run("rm -rf /tmp/project-src", shell=True)
-
-        project_builder.prepare_project_sources(source_path)
         aixcc_dir = oss_fuzz_path / "projects" / self.project_name / ".aixcc"
         if not aixcc_dir.exists():
             logger.error(
@@ -250,7 +265,9 @@ class OSSPatch:
                 )
 
                 cur_time = time.time()
-                project_builder.build_fuzzers(source_path)
+                if project_builder.build_fuzzers(source_path):
+                    return False
+
                 build_time_with_patch = time.time() - cur_time
                 logger.info(
                     f'Build time with incremental build and patch ("{patch_path.name}"): {build_time_with_patch}'
