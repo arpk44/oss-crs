@@ -14,6 +14,8 @@ from bug_fixing.src.oss_patch.functions import (
 )
 from bug_fixing.src.oss_patch.globals import DEFAULT_PROJECT_SOURCE_PATH
 
+from bug_fixing.src.oss_patch.inc_build_checker.rts_checker import analysis_log
+
 logger = logging.getLogger(__name__)
 
 
@@ -251,3 +253,212 @@ class IncrementalBuildChecker:
                 logger.info(f'Incremental build for "{pov_name}" has been validated')
 
         return True
+
+    def test_with_rts(self, rts_tool: str = "jcgeks") -> bool:
+        """Test RTS (Regression Test Selection) functionality.
+
+        Measures test execution time with and without RTS optimizations.
+        Similar to incremental build test - measures time before and after
+        docker commit (snapshot).
+
+        Only supported for JVM projects.
+
+        Args:
+            rts_tool: RTS tool to use (ekstazi or jcgeks)
+
+        Returns:
+            True if RTS test passes, False otherwise
+        """
+        if self.project_builder.project_lang != "jvm":
+            logger.error("RTS is only supported for JVM projects")
+            return False
+
+        logger.info(f"Starting RTS benchmark for {self.project_name} with tool '{rts_tool}'")
+
+        # Prepare project source
+        proj_src_path = DEFAULT_PROJECT_SOURCE_PATH
+        if proj_src_path.exists():
+            change_ownership_with_docker(proj_src_path)
+            shutil.rmtree(proj_src_path)
+        pull_project_source(self.project_path, proj_src_path)
+
+        # Build docker image
+        logger.info(
+            f'Creating project builder image: "{get_builder_image_name(self.oss_fuzz_path, self.project_name)}"'
+        )
+        cur_time = time.time()
+        self.project_builder.build(proj_src_path, inc_build_enabled=False)
+        image_build_time = time.time() - cur_time
+        logger.info(f"Docker image build time: {image_build_time:.2f}s")
+
+        # Step 1: Measure test time WITHOUT RTS (before snapshot)
+        if not self._measure_test_time_without_rts(proj_src_path, rts_tool):
+            return False
+
+        # Step 2: Take snapshot with RTS initialization (docker commit)
+        logger.info(f"Taking snapshot with RTS initialization (tool: {rts_tool})...")
+        if not self.project_builder.take_incremental_build_snapshot(
+            proj_src_path, rts_enabled=True, rts_tool=rts_tool
+        ):
+            logger.error("Taking RTS snapshot has failed")
+            return False
+
+        # Step 3: Measure test time WITH RTS (after snapshot)
+        if not self._measure_test_time_with_rts(proj_src_path, rts_tool):
+            return False
+
+        # Summary
+        self._print_rts_summary(rts_tool)
+
+        return True
+
+    def _measure_test_time_without_rts(self, source_path: Path, rts_tool: str) -> bool:
+        """Measure test time without RTS (before snapshot)."""
+        logger.info("Measuring test time without RTS (before snapshot)...")
+
+        log_file = self.work_dir / "test_no_rts.log"
+        cur_time = time.time()
+        result = self.project_builder.run_tests(
+            source_path, rts_enabled=False, log_file=log_file
+        )
+        self.test_time_without_rts = time.time() - cur_time
+
+        if result:
+            stdout, stderr = result
+            logger.error("Test execution without RTS failed")
+            logger.error(f"stdout: {stdout.decode()}")
+            logger.error(f"stderr: {stderr.decode()}")
+            return False
+
+        logger.info(f"Test time without RTS: {self.test_time_without_rts:.2f}s")
+
+        # Analyze log
+        if log_file.exists():
+            stats = analysis_log(log_file)
+            self.stats_no_rts = stats
+            logger.info(f"Tests run (no RTS): {stats[0]}, Total time: {stats[1]:.2f}s")
+
+        # Reset repository
+        change_ownership_with_docker(source_path)
+        if not reset_repository(source_path):
+            logger.error("Repository reset failed")
+            return False
+
+        return True
+
+    def _measure_test_time_with_rts(self, source_path: Path, rts_tool: str) -> bool:
+        """Measure test time with RTS (after snapshot).
+
+        Applies a patch from .aixcc/patches/ before running tests to simulate code changes.
+        Uses the first patch file found (sorted by name).
+        """
+        logger.info(f"Measuring test time with RTS (after snapshot, tool: {rts_tool})...")
+
+        # Find and apply patch from .aixcc/patches/
+        aixcc_dir = self.project_path / ".aixcc"
+        patches_dir = aixcc_dir / "patches"
+        patch_path = None
+
+        if patches_dir.exists():
+            # Find all .diff files recursively and sort by name
+            diff_files = sorted(patches_dir.rglob("*.diff"))
+            if diff_files:
+                patch_path = diff_files[0]
+
+        if patch_path:
+            logger.info(f"Applying patch: {patch_path}")
+            try:
+                subprocess.check_call(
+                    f"git apply {patch_path}",
+                    shell=True,
+                    cwd=source_path,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except subprocess.CalledProcessError:
+                logger.error(f"Failed to apply patch: {patch_path}")
+                return False
+        else:
+            logger.warning(f"No patch found in {patches_dir}, running without patch")
+
+        log_file = self.work_dir / "test_with_rts.log"
+        cur_time = time.time()
+        result = self.project_builder.run_tests(
+            source_path, rts_enabled=True, rts_tool=rts_tool, log_file=log_file
+        )
+        self.test_time_with_rts = time.time() - cur_time
+
+        if result:
+            stdout, stderr = result
+            logger.error("Test execution with RTS failed")
+            logger.error(f"stdout: {stdout.decode()}")
+            logger.error(f"stderr: {stderr.decode()}")
+            return False
+
+        logger.info(f"Test time with RTS: {self.test_time_with_rts:.2f}s")
+
+        # Analyze log
+        if log_file.exists():
+            stats = analysis_log(log_file)
+            self.stats_with_rts = stats
+            logger.info(
+                f"Tests run (with RTS): {stats[0]}, Total time: {stats[1]:.2f}s, JCG time: {stats[2]:.2f}s"
+            )
+
+        return True
+
+    def _print_rts_summary(self, rts_tool: str):
+        """Print RTS benchmark summary."""
+        logger.info("=" * 60)
+        logger.info(f"RTS Benchmark Results (tool: {rts_tool}):")
+        logger.info("-" * 60)
+
+        # Time comparison
+        logger.info("[Time Comparison]")
+        logger.info(f"  Without RTS (before snapshot): {self.test_time_without_rts:.2f}s")
+        logger.info(f"  With RTS (after snapshot):     {self.test_time_with_rts:.2f}s")
+        if self.test_time_without_rts > 0 and self.test_time_with_rts > 0:
+            time_saved = self.test_time_without_rts - self.test_time_with_rts
+            speedup = self.test_time_without_rts / self.test_time_with_rts
+            reduction_pct = (time_saved / self.test_time_without_rts) * 100
+            logger.info(f"  Time saved: {time_saved:.2f}s ({reduction_pct:.1f}% reduction)")
+            logger.info(f"  Speedup: {speedup:.2f}x")
+
+        # Test count comparison (from log analysis)
+        if hasattr(self, 'stats_no_rts') and hasattr(self, 'stats_with_rts'):
+            logger.info("-" * 60)
+            logger.info("[Test Count Comparison]")
+
+            tests_no_rts = self.stats_no_rts[0]
+            tests_with_rts = self.stats_with_rts[0]
+            tests_skipped = tests_no_rts - tests_with_rts
+
+            logger.info(f"  Tests run without RTS: {tests_no_rts}")
+            logger.info(f"  Tests run with RTS:    {tests_with_rts}")
+            logger.info(f"  Tests skipped by RTS:  {tests_skipped}")
+            if tests_no_rts > 0:
+                selection_pct = (tests_with_rts / tests_no_rts) * 100
+                logger.info(f"  Test selection rate:   {selection_pct:.1f}%")
+
+            # Test class comparison
+            classes_no_rts = len(self.stats_no_rts[3])
+            classes_with_rts = len(self.stats_with_rts[3])
+            logger.info(f"  Test classes without RTS: {classes_no_rts}")
+            logger.info(f"  Test classes with RTS:    {classes_with_rts}")
+
+            # JCG overhead
+            jcg_time = self.stats_with_rts[2]
+            if jcg_time > 0:
+                logger.info("-" * 60)
+                logger.info("[RTS Overhead]")
+                logger.info(f"  JCG analysis time: {jcg_time:.2f}s")
+
+            # Failure/Error/Skip comparison
+            failures_no_rts, errors_no_rts, skips_no_rts = self.stats_no_rts[5]
+            failures_with_rts, errors_with_rts, skips_with_rts = self.stats_with_rts[5]
+            logger.info("-" * 60)
+            logger.info("[Test Results]")
+            logger.info(f"  Without RTS - Total Runs: {tests_no_rts}, Failures: {failures_no_rts}, Errors: {errors_no_rts}, Skipped: {skips_no_rts}")
+            logger.info(f"  With RTS    - Total Runs: {tests_with_rts}, Failures: {failures_with_rts}, Errors: {errors_with_rts}, Skipped: {skips_with_rts}")
+
+        logger.info("=" * 60)

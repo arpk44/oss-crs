@@ -119,9 +119,29 @@ class OSSPatch:
     #     return oss_patch_runner.run_pov(harness_name, pov_path)
 
     # Testing purpose function
-    def test_inc_build(self, oss_fuzz_path: Path) -> bool:
+    def test_inc_build(
+        self,
+        oss_fuzz_path: Path,
+        with_rts: bool = False,
+        rts_tool: str = "jcgeks",
+        source_path: Path | None = None,
+    ) -> bool:
         oss_fuzz_path = oss_fuzz_path.resolve()
+        if source_path:
+            source_path = source_path.resolve()
 
-        return IncrementalBuildChecker(
+        checker = IncrementalBuildChecker(
             oss_fuzz_path, self.project_name, self.work_dir
-        ).test()
+        )
+
+        # Run basic incremental build test
+        if not checker.test():
+            return False
+
+        # If RTS test is requested, run it after inc_build test
+        if with_rts:
+            logger.info(f"Running RTS benchmark with tool '{rts_tool}'...")
+            if not checker.test_with_rts(rts_tool=rts_tool):
+                return False
+
+        return True

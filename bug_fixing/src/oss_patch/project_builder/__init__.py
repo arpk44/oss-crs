@@ -156,7 +156,12 @@ class OSSPatchProjectBuilder:
             self.project_path / "project.yaml"
         )
 
-    def build(self, source_path: Path, inc_build_enabled: bool = True) -> bool:
+    def build(
+        self,
+        source_path: Path,
+        inc_build_enabled: bool = True,
+        rts_enabled: bool = False,
+    ) -> bool:
         if not self._validate_arguments():
             return False
 
@@ -164,7 +169,7 @@ class OSSPatchProjectBuilder:
             return False
 
         if inc_build_enabled:
-            if not self.take_incremental_build_snapshot(source_path):
+            if not self.take_incremental_build_snapshot(source_path, rts_enabled):
                 return False
 
         return True
@@ -191,6 +196,85 @@ class OSSPatchProjectBuilder:
             return None
 
         return (proc.stdout, proc.stderr)
+
+    def run_tests(
+        self,
+        source_path: Path,
+        rts_enabled: bool = False,
+        rts_tool: str = "jcgeks",
+        log_file: Path | None = None,
+    ) -> tuple[bytes, bytes] | None:
+        """Run tests for the project.
+
+        Args:
+            source_path: Path to the project source
+            rts_enabled: Whether to enable RTS optimizations
+            rts_tool: RTS tool to use (ekstazi or jcgeks)
+            log_file: Optional path to save combined stdout/stderr output
+
+        Returns:
+            None if successful, (stdout, stderr) tuple if failed
+        """
+        test_sh_path = self.project_path / "test.sh"
+        if not test_sh_path.exists():
+            logger.error(f"test.sh not found: {test_sh_path}")
+            return (b"", b"test.sh not found")
+
+        builder_image_name = get_builder_image_name(
+            self.oss_fuzz_path, self.project_name
+        )
+
+        workdir = _workdir_from_dockerfile(self.project_path, self.project_name)
+
+        docker_command = ["docker", "run"]
+        docker_command.append("--rm")
+
+        # Environment variables
+        if rts_enabled:
+            docker_command.extend(["-e", "RTS_ON=1", "-e", f"RTS_TOOL={rts_tool}"])
+
+        # Volume mounts
+        docker_command.extend([
+            "-v", f"{source_path}:/local-source-mount",
+            "-v", f"{test_sh_path}:/test-mnt.sh",
+        ])
+
+        if rts_enabled:
+            rts_config_path = OSS_PATCH_RUNNER_DATA_PATH / "rts_config_jvm.py"
+            if rts_config_path.exists():
+                docker_command.extend(["-v", f"{rts_config_path}:/rts_config_jvm.py:ro"])
+
+        # Build container command
+        base_cmd = (
+            f"pushd $SRC && rm -rf {workdir} "
+            f"&& cp -r /local-source-mount {workdir} "
+            f"&& cp /test-mnt.sh $SRC/test.sh "
+            f"&& popd "
+        )
+
+        container_cmd = base_cmd + "&& bash $SRC/test.sh"
+
+        docker_command.extend([
+            builder_image_name,
+            "/bin/bash", "-c", container_cmd
+        ])
+
+        proc = subprocess.run(
+            docker_command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # Combine stderr into stdout
+        )
+
+        # Save combined output to log file if specified
+        if log_file:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_file, "wb") as f:
+                f.write(proc.stdout)
+
+        if proc.returncode == 0:
+            return None
+
+        return (proc.stdout, proc.stderr if proc.stderr else b"")
 
     def remove_builder_image(
         self, volume_name: str = OSS_PATCH_DOCKER_IMAGES_FOR_CRS
@@ -474,7 +558,9 @@ class OSSPatchProjectBuilder:
                 stderr=subprocess.DEVNULL,
             )
 
-    def _take_incremental_build_snapshot_for_java(self, source_path: Path) -> bool:
+    def _take_incremental_build_snapshot_for_java(
+        self, source_path: Path, rts_enabled: bool = False, rts_tool: str = "jcgeks"
+    ) -> bool:
         project_path = self.oss_fuzz_path / "projects" / self.project_name
         sanitizer = "address"
 
@@ -487,17 +573,68 @@ class OSSPatchProjectBuilder:
         )
         container_name = f"{self.project_name.split('/')[-1]}-origin-{sanitizer}"
 
+        # Build the container command
+        base_cmd = (
+            f"rsync -av \\$SRC/ {new_src_dir} && "
+            f"export SRC={new_src_dir} && "
+            f"cd {new_workdir} && "
+            f"chmod +x /usr/local/bin/compile && "
+            f"compile"
+        )
+
+        # Check if exclude_tests.txt exists
+        exclude_tests_path = self.project_path / "exclude_tests.txt"
+        exclude_tests_exists = exclude_tests_path.exists()
+
+        if rts_enabled:
+            # Add RTS initialization after compile
+            # test.sh and rts_init_jvm.py are mounted at /tmp/
+            exclude_file_opt = " --exclude-file /tmp/exclude_tests.txt" if exclude_tests_exists else ""
+            rts_cmd = (
+                f" && python3 /tmp/rts_init_jvm.py {new_workdir} --tool {rts_tool}{exclude_file_opt} && bash /tmp/test.sh"
+            )
+            container_cmd = base_cmd + rts_cmd
+        else:
+            container_cmd = base_cmd
+
         try:
+            # Build volume mounts
+            volume_mounts = (
+                f"-v={self.oss_fuzz_path}/ccaches/{self.project_name}/ccache:/workspace/ccache "
+                f"-v={self.oss_fuzz_path}/build/out/{self.project_name}/:/out/ "
+                f"-v={source_path}:{_workdir_from_dockerfile(project_path, self.project_name)} "
+            )
+
+            # Add RTS file mounts if enabled
+            if rts_enabled:
+                rts_init_path = OSS_PATCH_RUNNER_DATA_PATH / "rts_init_jvm.py"
+                test_sh_path = self.project_path / "test.sh"
+
+                if not rts_init_path.exists():
+                    logger.error(f"RTS file not found: {rts_init_path}")
+                    return False
+                if not test_sh_path.exists():
+                    logger.error(f"test.sh not found: {test_sh_path}")
+                    return False
+
+                volume_mounts += f"-v={rts_init_path}:/tmp/rts_init_jvm.py:ro "
+                volume_mounts += f"-v={test_sh_path}:/tmp/test.sh:ro "
+                logger.info("rts_init_jvm.py mounted to /tmp/rts_init_jvm.py")
+                logger.info("test.sh mounted to /tmp/test.sh")
+
+                # Mount exclude_tests.txt if it exists
+                if exclude_tests_exists:
+                    volume_mounts += f"-v={exclude_tests_path}:/tmp/exclude_tests.txt:ro "
+                    logger.info(f"exclude_tests.txt mounted to /tmp/exclude_tests.txt")
+
             create_container_command = (
                 f"docker create --privileged --net=host "
                 f"--env=SANITIZER={sanitizer} "
                 f"--env=FUZZING_LANGUAGE={self.project_lang} "
                 f"--name={container_name} "
-                f"-v={self.oss_fuzz_path}/ccaches/{self.project_name}/ccache:/workspace/ccache "
-                f"-v={self.oss_fuzz_path}/build/out/{self.project_name}/:/out/ "
-                f"-v={source_path}:{_workdir_from_dockerfile(project_path, self.project_name)} "
+                f"{volume_mounts}"
                 f"{builder_image_name} "
-                f'/bin/bash -c "rsync -av \\$SRC/ {new_src_dir} && export SRC={new_src_dir} && cd {new_workdir} && chmod +x /usr/local/bin/compile && compile"'
+                f'/bin/bash -c "{container_cmd}"'
             )
 
             proc = subprocess.run(
@@ -532,16 +669,23 @@ class OSSPatchProjectBuilder:
             proc = subprocess.run(
                 f"docker start -a {container_name}",
                 shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
             )
             if proc.returncode != 0:
                 logger.error("docker start command has failed")
                 return False
 
+            if rts_enabled:
+                logger.info("RTS initialization completed successfully")
+
+            # Build commit command with environment variables
+            env_options = f'-c "ENV SRC={new_src_dir}" '
+            if rts_enabled:
+                env_options += f'-c "ENV RTS_ON=1" '
+                env_options += f'-c "ENV RTS_TOOL={rts_tool}" '
+
             commit_command = (
                 f"docker container commit "
-                f'-c "ENV SRC={new_src_dir}" '
+                f"{env_options}"
                 f'-c "WORKDIR {new_workdir}" '
                 f'-c "CMD [\\"compile\\"]" '
                 f"{container_name} {builder_image_name}"
@@ -563,19 +707,21 @@ class OSSPatchProjectBuilder:
 
         finally:
             subprocess.run(
-                "docker stop $(docker ps -a -q)",
+                f"docker stop {container_name}",
                 shell=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
             subprocess.run(
-                "docker rm $(docker ps -a -q)",
+                f"docker rm {container_name}",
                 shell=True,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
 
-    def take_incremental_build_snapshot(self, source_path: Path) -> bool:
+    def take_incremental_build_snapshot(
+        self, source_path: Path, rts_enabled: bool = False, rts_tool: str = "jcgeks"
+    ) -> bool:
         logger.info("Taking a snapshot for incremental build...")
         assert self.oss_fuzz_path.exists()
         assert self.project_path
@@ -597,7 +743,9 @@ class OSSPatchProjectBuilder:
         if self.project_lang in ["c", "c++"]:
             return self._take_incremental_build_snapshot_for_c(source_path)
         elif self.project_lang == "jvm":
-            return self._take_incremental_build_snapshot_for_java(source_path)
+            return self._take_incremental_build_snapshot_for_java(
+                source_path, rts_enabled, rts_tool
+            )
         else:
             logger.error(
                 f'Incremental build for language "{self.project_lang}" is not supported.'

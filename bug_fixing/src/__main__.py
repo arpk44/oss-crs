@@ -62,7 +62,9 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
         )
     elif args.command == "test-inc-build":
         oss_patch = OSSPatch(args.project)
-        result = oss_patch.test_inc_build(Path(args.oss_fuzz))
+        result = oss_patch.test_inc_build(
+            Path(args.oss_fuzz), with_rts=args.with_rts, rts_tool=args.rts_tool
+        )
     # elif args.command == "run_pov":
     #     oss_patch = OSSPatch(args.project)
     #     result = oss_patch.run_pov(args.harness, Path(args.pov), args.source_path)
@@ -171,6 +173,24 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
     # )
     test_inc_build_parser.add_argument("project", help="name of the project")
     test_inc_build_parser.add_argument("oss_fuzz", help="path to OSS-Fuzz")
+    test_inc_build_parser.add_argument(
+        "--source-path",
+        help="Path to pre-cloned source code directory "
+        "(alternative to cloning from project.yaml main_repo).",
+        default=None,
+    )
+    test_inc_build_parser.add_argument(
+        "--with-rts",
+        action="store_true",
+        default=False,
+        help="run RTS (Regression Test Selection) after incremental build test.",
+    )
+    test_inc_build_parser.add_argument(
+        "--rts-tool",
+        choices=["ekstazi", "jcgeks"],
+        default="jcgeks",
+        help="RTS tool to use (default: jcgeks). Only used when --with-rts is specified.",
+    )
 
     test_project_parser = subparsers.add_parser(
         "check_povs",
