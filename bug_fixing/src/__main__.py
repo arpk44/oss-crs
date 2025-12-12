@@ -187,7 +187,7 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
     )
     test_inc_build_parser.add_argument(
         "--rts-tool",
-        choices=["ekstazi", "jcgeks"],
+        choices=["ekstazi", "jcgeks", "openclover"],
         default="jcgeks",
         help="RTS tool to use (default: jcgeks). Only used when --with-rts is specified.",
     )

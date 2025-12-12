@@ -264,7 +264,7 @@ class IncrementalBuildChecker:
         Only supported for JVM projects.
 
         Args:
-            rts_tool: RTS tool to use (ekstazi or jcgeks)
+            rts_tool: RTS tool to use (ekstazi, jcgeks, or openclover)
 
         Returns:
             True if RTS test passes, False otherwise

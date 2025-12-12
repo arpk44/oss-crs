@@ -10,11 +10,11 @@ This script performs dynamic configuration for RTS tools before each test run:
 Assumes patch was applied via `git apply` or `patch` command (uncommitted).
 
 Usage:
-    python rts_config.py [project_path] [--tool ekstazi|jcgeks]  # project_path defaults to current directory
+    python rts_config.py [project_path] [--tool ekstazi|jcgeks|openclover]  # project_path defaults to current directory
 
 Environment variables:
     RTS_ON: If set to "1" or "true", RTS configuration will be applied
-    RTS_TOOL: RTS tool to use (ekstazi or jcgeks), default: jcgeks
+    RTS_TOOL: RTS tool to use (ekstazi, jcgeks, or openclover), default: jcgeks
 """
 
 import os
@@ -262,6 +262,26 @@ class EkstaziConfig:
         print("[INFO] Ekstazi preparation completed!")
 
 
+class OpenCloverConfig:
+    """OpenClover configuration handler."""
+
+    def __init__(self, project_path: str):
+        self.project_path = os.path.abspath(project_path)
+        self.project_name = os.path.basename(self.project_path.rstrip("/"))
+
+    def prepare(self) -> None:
+        """
+        Prepare OpenClover configuration.
+
+        OpenClover handles test optimization internally using its snapshot mechanism.
+        No explicit configuration files are needed before each test run.
+        The plugin reads from ${user.home}/.clover/clover.snapshot automatically.
+        """
+        print(f"[INFO] Preparing OpenClover for: {self.project_name}")
+        print("[INFO] OpenClover requires no dynamic configuration - test optimization is handled internally via snapshot mechanism")
+        print("[INFO] OpenClover preparation completed!")
+
+
 def configure_rts(project_path: str, tool_name: str) -> bool:
     """
     Configure RTS tool for the current test run.
@@ -270,7 +290,7 @@ def configure_rts(project_path: str, tool_name: str) -> bool:
 
     Args:
         project_path: Path to the Java project root
-        tool_name: RTS tool to use (ekstazi or jcgeks)
+        tool_name: RTS tool to use (ekstazi, jcgeks, or openclover)
 
     Returns:
         True if configuration succeeded, False otherwise
@@ -289,6 +309,9 @@ def configure_rts(project_path: str, tool_name: str) -> bool:
             config.generate_all()
         elif tool_name == "ekstazi":
             config = EkstaziConfig(project_path)
+            config.prepare()
+        elif tool_name == "openclover":
+            config = OpenCloverConfig(project_path)
             config.prepare()
         else:
             print(f"[ERROR] Unknown RTS tool: {tool_name}")
@@ -319,9 +342,9 @@ def main():
     )
     parser.add_argument(
         "--tool",
-        choices=["ekstazi", "jcgeks"],
+        choices=["ekstazi", "jcgeks", "openclover"],
         default=os.environ.get("RTS_TOOL", "jcgeks"),
-        help="RTS tool to use: ekstazi or jcgeks (default: jcgeks or RTS_TOOL env var)",
+        help="RTS tool to use: ekstazi, jcgeks, or openclover (default: jcgeks or RTS_TOOL env var)",
     )
     parser.add_argument(
         "--force",

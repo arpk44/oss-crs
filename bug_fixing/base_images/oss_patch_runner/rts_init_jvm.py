@@ -2,19 +2,20 @@
 """
 RTS (Regression Test Selection) initialization script.
 
-This script performs one-time setup for RTS tools (Ekstazi, JcgEks) on Java projects:
+This script performs one-time setup for RTS tools (Ekstazi, JcgEks, OpenClover) on Java projects:
 - Modifies pom.xml files to add surefire and RTS tool plugins
 - Configures surefire settings for RTS compatibility
 - Cleans up existing RTS artifacts
 - Commits changes to git
 
 Usage:
-    python rts_init.py [project_path] [--tool ekstazi|jcgeks]  # project_path defaults to current directory
+    python rts_init.py [project_path] [--tool ekstazi|jcgeks|openclover]  # project_path defaults to current directory
     python rts_init.py --install-deps  # Install Ekstazi and JcgEks dependencies only
     python rts_init.py [project_path] --exclude-file /path/to/excludes.txt  # Add exclude patterns from file
+    python rts_init.py [project_path] --include-file /path/to/includes.txt  # Add include patterns from file
 
 Environment variables:
-    RTS_TOOL: RTS tool to use (ekstazi or jcgeks), default: jcgeks
+    RTS_TOOL: RTS tool to use (ekstazi, jcgeks, or openclover), default: jcgeks
 """
 
 import os
@@ -27,7 +28,7 @@ from pathlib import Path
 from typing import List, Optional
 import tempfile
 
-# RTS tool configurations (only ekstazi and jcgeks supported)
+# RTS tool configurations (ekstazi, jcgeks, and openclover supported)
 RTS_TOOLS = {
     "ekstazi": {
         "group_id": "org.ekstazi",
@@ -38,6 +39,11 @@ RTS_TOOLS = {
         "group_id": "org.jcgeks",
         "artifact_id": "jcgeks-maven-plugin",
         "version": "1.0.0",
+    },
+    "openclover": {
+        "group_id": "org.openclover",
+        "artifact_id": "clover-maven-plugin",
+        "version": "4.5.2",
     },
 }
 
@@ -452,7 +458,8 @@ def create_surefire_plugin(project_name: str, tool_name: str) -> ET.Element:
         "org.apache.maven.plugins", "maven-surefire-plugin", SUREFIRE_VERSION
     )
 
-    if tool_name != "rtscheck":
+    # OpenClover doesn't use excludesFile - it handles test selection internally
+    if tool_name not in ("rtscheck", "openclover"):
         configuration = ET.SubElement(plugin, "configuration")
         excludes_file = ET.SubElement(configuration, "excludesFile")
         # Use unique exclude file path per project and tool
@@ -464,7 +471,7 @@ def create_surefire_plugin(project_name: str, tool_name: str) -> ET.Element:
 
 
 def create_rts_plugin(tool_name: str) -> ET.Element:
-    """Create RTS tool plugin element (Ekstazi or JcgEks)."""
+    """Create RTS tool plugin element (Ekstazi, JcgEks, or OpenClover)."""
     tool_config = RTS_TOOLS.get(tool_name)
     if not tool_config:
         raise ValueError(f"Unknown RTS tool: {tool_name}")
@@ -473,18 +480,24 @@ def create_rts_plugin(tool_name: str) -> ET.Element:
         tool_config["group_id"], tool_config["artifact_id"], tool_config["version"]
     )
 
-    # Add executions
-    executions = ET.SubElement(plugin, "executions")
-    execution = ET.SubElement(executions, "execution")
+    if tool_name == "openclover":
+        # OpenClover uses different configuration - snapshot for test optimization
+        configuration = ET.SubElement(plugin, "configuration")
+        snapshot = ET.SubElement(configuration, "snapshot")
+        snapshot.text = "${user.home}/.clover/clover.snapshot"
+    else:
+        # Ekstazi and JcgEks use select/restore goals
+        executions = ET.SubElement(plugin, "executions")
+        execution = ET.SubElement(executions, "execution")
 
-    execution_id = ET.SubElement(execution, "id")
-    execution_id.text = tool_name
+        execution_id = ET.SubElement(execution, "id")
+        execution_id.text = tool_name
 
-    goals = ET.SubElement(execution, "goals")
-    goal_select = ET.SubElement(goals, "goal")
-    goal_select.text = "select"
-    goal_restore = ET.SubElement(goals, "goal")
-    goal_restore.text = "restore"
+        goals = ET.SubElement(execution, "goals")
+        goal_select = ET.SubElement(goals, "goal")
+        goal_select.text = "select"
+        goal_restore = ET.SubElement(goals, "goal")
+        goal_restore.text = "restore"
 
     return plugin
 
@@ -673,6 +686,110 @@ def add_excludes_to_surefire(pom_path: str, exclude_patterns: List[str]) -> bool
         return False
 
 
+def add_includes_to_surefire(pom_path: str, include_patterns: List[str]) -> bool:
+    """
+    Add include patterns to surefire plugin configuration in pom.xml.
+
+    Args:
+        pom_path: Path to the pom.xml file
+        include_patterns: List of include patterns (regex or ant-style patterns)
+
+    Returns:
+        True if modification succeeded, False otherwise
+    """
+    if not include_patterns:
+        return True
+
+    ns = "{" + MAVEN_NAMESPACE + "}"
+
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ET.register_namespace("", MAVEN_NAMESPACE)
+
+        # Find build element
+        build = root.find(ns + "build")
+        if build is None:
+            build = root.find("build")
+        if build is None:
+            print(f"[WARNING] No <build> element found in {pom_path}, skipping includes")
+            return True
+
+        # Find plugins element
+        plugins = build.find(ns + "plugins")
+        if plugins is None:
+            plugins = build.find("plugins")
+        if plugins is None:
+            print(f"[WARNING] No <build><plugins> element found in {pom_path}, skipping includes")
+            return True
+
+        # Determine namespace used in this pom.xml
+        plugin_ns = ns if plugins.find(ns + "plugin") is not None else ""
+
+        # Find surefire plugin
+        surefire_plugin = None
+        for plugin in plugins:
+            if plugin.tag == plugin_ns + "plugin" or plugin.tag == "plugin":
+                artifact_id = plugin.find(plugin_ns + "artifactId")
+                if artifact_id is None:
+                    artifact_id = plugin.find("artifactId")
+                if artifact_id is not None and artifact_id.text == "maven-surefire-plugin":
+                    surefire_plugin = plugin
+                    break
+
+        if surefire_plugin is None:
+            # Create new surefire plugin with includes
+            surefire_plugin = ET.Element("plugin")
+            group_elem = ET.SubElement(surefire_plugin, "groupId")
+            group_elem.text = "org.apache.maven.plugins"
+            artifact_elem = ET.SubElement(surefire_plugin, "artifactId")
+            artifact_elem.text = "maven-surefire-plugin"
+            version_elem = ET.SubElement(surefire_plugin, "version")
+            version_elem.text = SUREFIRE_VERSION
+            plugins.append(surefire_plugin)
+            print(f"[INFO] Created new surefire plugin for includes")
+
+        # Find or create configuration element
+        configuration = surefire_plugin.find(plugin_ns + "configuration")
+        if configuration is None:
+            configuration = surefire_plugin.find("configuration")
+        if configuration is None:
+            configuration = ET.SubElement(surefire_plugin, "configuration")
+
+        # Find or create includes element
+        includes = configuration.find(plugin_ns + "includes")
+        if includes is None:
+            includes = configuration.find("includes")
+        if includes is None:
+            includes = ET.SubElement(configuration, "includes")
+
+        # Get existing include patterns to avoid duplicates
+        existing_patterns = set()
+        for include in includes:
+            if include.text:
+                existing_patterns.add(include.text.strip())
+
+        # Add new include patterns
+        added_count = 0
+        for pattern in include_patterns:
+            if pattern not in existing_patterns:
+                include_elem = ET.SubElement(includes, "include")
+                include_elem.text = pattern
+                existing_patterns.add(pattern)
+                added_count += 1
+
+        if added_count > 0:
+            tree.write(pom_path, encoding="utf-8", xml_declaration=True)
+            format_xml_with_xmllint(pom_path)
+            print(f"[INFO] Added {added_count} include pattern(s) to {pom_path}")
+
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Failed to add includes to {pom_path}: {e}")
+        return False
+
+
 def add_rts_plugins_to_pom(pom_path: str, project_name: str, tool_name: str) -> bool:
     """Add RTS tool plugin and configure surefire excludesFile in a pom.xml file."""
     ns = "{" + MAVEN_NAMESPACE + "}"
@@ -718,29 +835,31 @@ def add_rts_plugins_to_pom(pom_path: str, project_name: str, tool_name: str) -> 
                     break
 
         # Add excludesFile to existing surefire or create new one
-        if surefire_plugin is not None:
-            # Add excludesFile to existing surefire
-            configuration = surefire_plugin.find(plugin_ns + "configuration")
-            if configuration is None:
-                configuration = surefire_plugin.find("configuration")
-            if configuration is None:
-                configuration = ET.SubElement(surefire_plugin, "configuration")
+        # OpenClover doesn't use excludesFile - it handles test selection internally
+        if tool_name != "openclover":
+            if surefire_plugin is not None:
+                # Add excludesFile to existing surefire
+                configuration = surefire_plugin.find(plugin_ns + "configuration")
+                if configuration is None:
+                    configuration = surefire_plugin.find("configuration")
+                if configuration is None:
+                    configuration = ET.SubElement(surefire_plugin, "configuration")
 
-            excludes_file = configuration.find(plugin_ns + "excludesFile")
-            if excludes_file is None:
-                excludes_file = configuration.find("excludesFile")
-            if excludes_file is None:
-                excludes_file = ET.SubElement(configuration, "excludesFile")
+                excludes_file = configuration.find(plugin_ns + "excludesFile")
+                if excludes_file is None:
+                    excludes_file = configuration.find("excludesFile")
+                if excludes_file is None:
+                    excludes_file = ET.SubElement(configuration, "excludesFile")
 
-            prefix_path = "/tmp/" + project_name
-            exclude_target = f"_{tool_name}Excludes"
-            excludes_file.text = prefix_path + exclude_target
-            print(f"[INFO] Added excludesFile to existing surefire plugin")
-        else:
-            # Create new surefire plugin
-            new_surefire = create_surefire_plugin(project_name, tool_name)
-            plugins.append(new_surefire)
-            print(f"[INFO] Created new surefire plugin")
+                prefix_path = "/tmp/" + project_name
+                exclude_target = f"_{tool_name}Excludes"
+                excludes_file.text = prefix_path + exclude_target
+                print(f"[INFO] Added excludesFile to existing surefire plugin")
+            else:
+                # Create new surefire plugin
+                new_surefire = create_surefire_plugin(project_name, tool_name)
+                plugins.append(new_surefire)
+                print(f"[INFO] Created new surefire plugin")
 
         # Check if RTS plugin already exists
         rts_config = RTS_TOOLS.get(tool_name)
@@ -826,14 +945,20 @@ def git_commit_changes(project_path: str, tool_name: str) -> bool:
     return True
 
 
-def init_rts(project_path: str, tool_name: str, exclude_file: Optional[str] = None) -> bool:
+def init_rts(
+    project_path: str,
+    tool_name: str,
+    exclude_file: Optional[str] = None,
+    include_file: Optional[str] = None,
+) -> bool:
     """
     Initialize RTS tool configuration for a Java project.
 
     Args:
         project_path: Path to the Java project root
-        tool_name: RTS tool to use (ekstazi or jcgeks)
+        tool_name: RTS tool to use (ekstazi, jcgeks, or openclover)
         exclude_file: Optional path to file containing exclude patterns (one per line)
+        include_file: Optional path to file containing include patterns (one per line)
 
     Returns:
         True if initialization succeeded, False otherwise
@@ -866,12 +991,16 @@ def init_rts(project_path: str, tool_name: str, exclude_file: Optional[str] = No
     cleanup_rts_artifacts(project_path)
 
     # Step 2: Install RTS tool dependencies
-    print(f"[INFO] Step 2: Installing {tool_name} dependencies...")
-    if tool_name == "jcgeks":
+    # OpenClover is fetched from Maven Central, no manual installation needed
+    if tool_name == "openclover":
+        print(f"[INFO] Step 2: Skipping dependency installation for {tool_name} (fetched from Maven Central)")
+    elif tool_name == "jcgeks":
+        print(f"[INFO] Step 2: Installing {tool_name} dependencies...")
         if not install_jcgeks_jars():
             print("[ERROR] Failed to install JcgEks dependencies")
             return False
     elif tool_name == "ekstazi":
+        print(f"[INFO] Step 2: Installing {tool_name} dependencies...")
         if not install_ekstazi_jars():
             print("[ERROR] Failed to install Ekstazi dependencies")
             return False
@@ -890,7 +1019,7 @@ def init_rts(project_path: str, tool_name: str, exclude_file: Optional[str] = No
 
     # Step 5: Add exclude patterns from file (if provided)
     if exclude_file:
-        print(f"[INFO] Step 5: Adding exclude patterns from {exclude_file}...")
+        print(f"[INFO] Step 5a: Adding exclude patterns from {exclude_file}...")
         exclude_patterns = read_exclude_patterns(exclude_file)
         if exclude_patterns:
             for pom_path in pom_files:
@@ -900,6 +1029,20 @@ def init_rts(project_path: str, tool_name: str, exclude_file: Optional[str] = No
                     print(f"[WARNING] Failed to add excludes to: {pom_path}")
         else:
             print("[INFO] No exclude patterns to add")
+
+    # Step 5b: Add include patterns from file (if provided)
+    if include_file:
+        print(f"[INFO] Step 5b: Adding include patterns from {include_file}...")
+        # Reuse read_exclude_patterns - it just reads lines from a file
+        include_patterns = read_exclude_patterns(include_file)
+        if include_patterns:
+            for pom_path in pom_files:
+                if add_includes_to_surefire(pom_path, include_patterns):
+                    print(f"[INFO] Added includes to: {pom_path}")
+                else:
+                    print(f"[WARNING] Failed to add includes to: {pom_path}")
+        else:
+            print("[INFO] No include patterns to add")
 
     # Step 6: Commit changes to git
     print("[INFO] Step 6: Committing changes to git...")
@@ -936,6 +1079,12 @@ def main():
         default=None,
         help="Path to file containing exclude patterns (one regex/ant-style pattern per line)",
     )
+    parser.add_argument(
+        "--include-file",
+        type=str,
+        default=None,
+        help="Path to file containing include patterns (one regex/ant-style pattern per line)",
+    )
 
     args = parser.parse_args()
 
@@ -948,7 +1097,7 @@ def main():
         print(f"[ERROR] Project path does not exist: {args.project_path}")
         sys.exit(1)
 
-    success = init_rts(args.project_path, args.tool, args.exclude_file)
+    success = init_rts(args.project_path, args.tool, args.exclude_file, args.include_file)
     sys.exit(0 if success else 1)
 
 

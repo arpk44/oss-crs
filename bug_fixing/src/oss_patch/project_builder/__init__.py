@@ -209,7 +209,7 @@ class OSSPatchProjectBuilder:
         Args:
             source_path: Path to the project source
             rts_enabled: Whether to enable RTS optimizations
-            rts_tool: RTS tool to use (ekstazi or jcgeks)
+            rts_tool: RTS tool to use (ekstazi, jcgeks, or openclover)
             log_file: Optional path to save combined stdout/stderr output
 
         Returns:
@@ -243,6 +243,16 @@ class OSSPatchProjectBuilder:
             rts_config_path = OSS_PATCH_RUNNER_DATA_PATH / "rts_config_jvm.py"
             if rts_config_path.exists():
                 docker_command.extend(["-v", f"{rts_config_path}:/rts_config_jvm.py:ro"])
+
+        # Mount exclude_tests.txt if it exists in project_path
+        exclude_tests_path = self.project_path / "exclude_tests.txt"
+        if exclude_tests_path.exists():
+            docker_command.extend(["-v", f"{exclude_tests_path}:/src/exclude_tests.txt:ro"])
+
+        # Mount include_tests.txt if it exists in project_path
+        include_tests_path = self.project_path / "include_tests.txt"
+        if include_tests_path.exists():
+            docker_command.extend(["-v", f"{include_tests_path}:/src/include_tests.txt:ro"])
 
         # Build container command
         base_cmd = (
@@ -582,16 +592,19 @@ class OSSPatchProjectBuilder:
             f"compile"
         )
 
-        # Check if exclude_tests.txt exists
+        # Check if exclude_tests.txt and include_tests.txt exist
         exclude_tests_path = self.project_path / "exclude_tests.txt"
         exclude_tests_exists = exclude_tests_path.exists()
+        include_tests_path = self.project_path / "include_tests.txt"
+        include_tests_exists = include_tests_path.exists()
 
         if rts_enabled:
             # Add RTS initialization after compile
             # test.sh and rts_init_jvm.py are mounted at /tmp/
-            exclude_file_opt = " --exclude-file /tmp/exclude_tests.txt" if exclude_tests_exists else ""
+            exclude_file_opt = " --exclude-file /src/exclude_tests.txt" if exclude_tests_exists else ""
+            include_file_opt = " --include-file /src/include_tests.txt" if include_tests_exists else ""
             rts_cmd = (
-                f" && python3 /tmp/rts_init_jvm.py {new_workdir} --tool {rts_tool}{exclude_file_opt} && bash /tmp/test.sh"
+                f" && python3 /tmp/rts_init_jvm.py {new_workdir} --tool {rts_tool}{exclude_file_opt}{include_file_opt} && bash /src/test.sh"
             )
             container_cmd = base_cmd + rts_cmd
         else:
@@ -618,14 +631,19 @@ class OSSPatchProjectBuilder:
                     return False
 
                 volume_mounts += f"-v={rts_init_path}:/tmp/rts_init_jvm.py:ro "
-                volume_mounts += f"-v={test_sh_path}:/tmp/test.sh:ro "
+                volume_mounts += f"-v={test_sh_path}:/src/test.sh:ro "
                 logger.info("rts_init_jvm.py mounted to /tmp/rts_init_jvm.py")
-                logger.info("test.sh mounted to /tmp/test.sh")
+                logger.info("test.sh mounted to /src/test.sh")
 
                 # Mount exclude_tests.txt if it exists
                 if exclude_tests_exists:
-                    volume_mounts += f"-v={exclude_tests_path}:/tmp/exclude_tests.txt:ro "
-                    logger.info(f"exclude_tests.txt mounted to /tmp/exclude_tests.txt")
+                    volume_mounts += f"-v={exclude_tests_path}:/src/exclude_tests.txt:ro "
+                    logger.info(f"exclude_tests.txt mounted to /src/exclude_tests.txt")
+
+                # Mount include_tests.txt if it exists
+                if include_tests_exists:
+                    volume_mounts += f"-v={include_tests_path}:/src/include_tests.txt:ro "
+                    logger.info(f"include_tests.txt mounted to /src/include_tests.txt")
 
             create_container_command = (
                 f"docker create --privileged --net=host "
