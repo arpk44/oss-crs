@@ -11,6 +11,7 @@ This script performs one-time setup for RTS tools (Ekstazi, JcgEks) on Java proj
 Usage:
     python rts_init.py [project_path] [--tool ekstazi|jcgeks]  # project_path defaults to current directory
     python rts_init.py --install-deps  # Install Ekstazi and JcgEks dependencies only
+    python rts_init.py [project_path] --exclude-file /path/to/excludes.txt  # Add exclude patterns from file
 
 Environment variables:
     RTS_TOOL: RTS tool to use (ekstazi or jcgeks), default: jcgeks
@@ -377,6 +378,35 @@ def find_pom_files(project_path: str) -> List[str]:
     return pom_files
 
 
+def read_exclude_patterns(exclude_file: str) -> List[str]:
+    """
+    Read exclude patterns from a file (one pattern per line).
+
+    Args:
+        exclude_file: Path to the file containing exclude patterns
+
+    Returns:
+        List of exclude patterns (empty lines and comments starting with # are ignored)
+    """
+    patterns = []
+    if not os.path.isfile(exclude_file):
+        print(f"[WARNING] Exclude file not found: {exclude_file}")
+        return patterns
+
+    try:
+        with open(exclude_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if line and not line.startswith("#"):
+                    patterns.append(line)
+        print(f"[INFO] Read {len(patterns)} exclude pattern(s) from {exclude_file}")
+    except Exception as e:
+        print(f"[ERROR] Failed to read exclude file {exclude_file}: {e}")
+
+    return patterns
+
+
 def get_pom_tree_and_plugins(pom_path: str) -> tuple:
     """Parse pom.xml and return tree and plugins element."""
     tree = ET.parse(pom_path)
@@ -426,7 +456,7 @@ def create_surefire_plugin(project_name: str, tool_name: str) -> ET.Element:
         configuration = ET.SubElement(plugin, "configuration")
         excludes_file = ET.SubElement(configuration, "excludesFile")
         # Use unique exclude file path per project and tool
-        prefix_path = "${java.io.tmpdir}/" + project_name
+        prefix_path = "/tmp/" + project_name
         exclude_target = f"_{tool_name}Excludes"
         excludes_file.text = prefix_path + exclude_target
 
@@ -523,7 +553,7 @@ def add_excludes_file_to_surefire(pom_path: str, project_name: str, tool_name: s
                     excludes_file = ET.SubElement(configuration, "excludesFile")
 
                 # Set excludesFile path
-                prefix_path = "${java.io.tmpdir}/" + project_name
+                prefix_path = "/tmp/" + project_name
                 exclude_target = f"_{tool_name}Excludes"
                 excludes_file.text = prefix_path + exclude_target
 
@@ -536,6 +566,110 @@ def add_excludes_file_to_surefire(pom_path: str, project_name: str, tool_name: s
 
     except Exception as e:
         print(f"[ERROR] Failed to modify surefire in {pom_path}: {e}")
+        return False
+
+
+def add_excludes_to_surefire(pom_path: str, exclude_patterns: List[str]) -> bool:
+    """
+    Add exclude patterns to surefire plugin configuration in pom.xml.
+
+    Args:
+        pom_path: Path to the pom.xml file
+        exclude_patterns: List of exclude patterns (regex or ant-style patterns)
+
+    Returns:
+        True if modification succeeded, False otherwise
+    """
+    if not exclude_patterns:
+        return True
+
+    ns = "{" + MAVEN_NAMESPACE + "}"
+
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ET.register_namespace("", MAVEN_NAMESPACE)
+
+        # Find build element
+        build = root.find(ns + "build")
+        if build is None:
+            build = root.find("build")
+        if build is None:
+            print(f"[WARNING] No <build> element found in {pom_path}, skipping excludes")
+            return True
+
+        # Find plugins element
+        plugins = build.find(ns + "plugins")
+        if plugins is None:
+            plugins = build.find("plugins")
+        if plugins is None:
+            print(f"[WARNING] No <build><plugins> element found in {pom_path}, skipping excludes")
+            return True
+
+        # Determine namespace used in this pom.xml
+        plugin_ns = ns if plugins.find(ns + "plugin") is not None else ""
+
+        # Find surefire plugin
+        surefire_plugin = None
+        for plugin in plugins:
+            if plugin.tag == plugin_ns + "plugin" or plugin.tag == "plugin":
+                artifact_id = plugin.find(plugin_ns + "artifactId")
+                if artifact_id is None:
+                    artifact_id = plugin.find("artifactId")
+                if artifact_id is not None and artifact_id.text == "maven-surefire-plugin":
+                    surefire_plugin = plugin
+                    break
+
+        if surefire_plugin is None:
+            # Create new surefire plugin with excludes
+            surefire_plugin = ET.Element("plugin")
+            group_elem = ET.SubElement(surefire_plugin, "groupId")
+            group_elem.text = "org.apache.maven.plugins"
+            artifact_elem = ET.SubElement(surefire_plugin, "artifactId")
+            artifact_elem.text = "maven-surefire-plugin"
+            version_elem = ET.SubElement(surefire_plugin, "version")
+            version_elem.text = SUREFIRE_VERSION
+            plugins.append(surefire_plugin)
+            print(f"[INFO] Created new surefire plugin for excludes")
+
+        # Find or create configuration element
+        configuration = surefire_plugin.find(plugin_ns + "configuration")
+        if configuration is None:
+            configuration = surefire_plugin.find("configuration")
+        if configuration is None:
+            configuration = ET.SubElement(surefire_plugin, "configuration")
+
+        # Find or create excludes element
+        excludes = configuration.find(plugin_ns + "excludes")
+        if excludes is None:
+            excludes = configuration.find("excludes")
+        if excludes is None:
+            excludes = ET.SubElement(configuration, "excludes")
+
+        # Get existing exclude patterns to avoid duplicates
+        existing_patterns = set()
+        for exclude in excludes:
+            if exclude.text:
+                existing_patterns.add(exclude.text.strip())
+
+        # Add new exclude patterns
+        added_count = 0
+        for pattern in exclude_patterns:
+            if pattern not in existing_patterns:
+                exclude_elem = ET.SubElement(excludes, "exclude")
+                exclude_elem.text = pattern
+                existing_patterns.add(pattern)
+                added_count += 1
+
+        if added_count > 0:
+            tree.write(pom_path, encoding="utf-8", xml_declaration=True)
+            format_xml_with_xmllint(pom_path)
+            print(f"[INFO] Added {added_count} exclude pattern(s) to {pom_path}")
+
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Failed to add excludes to {pom_path}: {e}")
         return False
 
 
@@ -598,7 +732,7 @@ def add_rts_plugins_to_pom(pom_path: str, project_name: str, tool_name: str) -> 
             if excludes_file is None:
                 excludes_file = ET.SubElement(configuration, "excludesFile")
 
-            prefix_path = "${java.io.tmpdir}/" + project_name
+            prefix_path = "/tmp/" + project_name
             exclude_target = f"_{tool_name}Excludes"
             excludes_file.text = prefix_path + exclude_target
             print(f"[INFO] Added excludesFile to existing surefire plugin")
@@ -692,13 +826,14 @@ def git_commit_changes(project_path: str, tool_name: str) -> bool:
     return True
 
 
-def init_rts(project_path: str, tool_name: str) -> bool:
+def init_rts(project_path: str, tool_name: str, exclude_file: Optional[str] = None) -> bool:
     """
     Initialize RTS tool configuration for a Java project.
 
     Args:
         project_path: Path to the Java project root
         tool_name: RTS tool to use (ekstazi or jcgeks)
+        exclude_file: Optional path to file containing exclude patterns (one per line)
 
     Returns:
         True if initialization succeeded, False otherwise
@@ -753,8 +888,21 @@ def init_rts(project_path: str, tool_name: str) -> bool:
     print("[INFO] Step 4: Configuring surefire settings...")
     configure_surefire_settings(project_path)
 
-    # Step 5: Commit changes to git
-    print("[INFO] Step 5: Committing changes to git...")
+    # Step 5: Add exclude patterns from file (if provided)
+    if exclude_file:
+        print(f"[INFO] Step 5: Adding exclude patterns from {exclude_file}...")
+        exclude_patterns = read_exclude_patterns(exclude_file)
+        if exclude_patterns:
+            for pom_path in pom_files:
+                if add_excludes_to_surefire(pom_path, exclude_patterns):
+                    print(f"[INFO] Added excludes to: {pom_path}")
+                else:
+                    print(f"[WARNING] Failed to add excludes to: {pom_path}")
+        else:
+            print("[INFO] No exclude patterns to add")
+
+    # Step 6: Commit changes to git
+    print("[INFO] Step 6: Committing changes to git...")
     git_commit_changes(project_path, tool_name)
 
     print("[INFO] RTS initialization completed successfully!")
@@ -782,6 +930,12 @@ def main():
         action="store_true",
         help="Install RTS dependencies only (Ekstazi and JcgEks, no project configuration)",
     )
+    parser.add_argument(
+        "--exclude-file",
+        type=str,
+        default=None,
+        help="Path to file containing exclude patterns (one regex/ant-style pattern per line)",
+    )
 
     args = parser.parse_args()
 
@@ -794,7 +948,7 @@ def main():
         print(f"[ERROR] Project path does not exist: {args.project_path}")
         sys.exit(1)
 
-    success = init_rts(args.project_path, args.tool)
+    success = init_rts(args.project_path, args.tool, args.exclude_file)
     sys.exit(0 if success else 1)
 
 
