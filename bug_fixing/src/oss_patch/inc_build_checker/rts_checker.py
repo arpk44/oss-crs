@@ -49,10 +49,10 @@ def analysis_log(log_file: Path):
     Ported from RTSTool.py's analysis_log method.
 
     Returns:
-        [test_run, total_time, jcg_time, run_classes_list, output_class_set, [failure, error, skip]]
+        [test_run, total_time, run_classes_list, output_class_set, [failure, error, skip]]
     """
-    # [test_run, Total time, JCG Time, run classes list, output testClass set, [failure, error, skip]]
-    analysis_res = [0, 0, 0, [], set(), [0, 0, 0]]
+    # [test_run, Total time, run classes list, output testClass set, [failure, error, skip]]
+    analysis_res = [0, 0, [], set(), [0, 0, 0]]
 
     if not os.path.exists(log_file):
         logger.warning(f"Log file does not exist: {log_file}")
@@ -93,11 +93,11 @@ def analysis_log(log_file: Path):
 
                 # compute failures
                 failures_num = result_list[1].split(":")[1]
-                analysis_res[5][0] = analysis_res[5][0] + int(failures_num)
+                analysis_res[4][0] = analysis_res[4][0] + int(failures_num)
 
                 # compute errors
                 errors_num = result_list[2].split(":")[1]
-                analysis_res[5][1] = analysis_res[5][1] + int(errors_num)
+                analysis_res[4][1] = analysis_res[4][1] + int(errors_num)
 
                 # compute skipped
                 skipped_str = result_list[3].split(":")[1]
@@ -105,7 +105,7 @@ def analysis_log(log_file: Path):
                 for ch in skipped_str:
                     if ch.isdigit():
                         skipped_num += ch
-                analysis_res[5][2] = analysis_res[5][2] + int(skipped_num)
+                analysis_res[4][2] = analysis_res[4][2] + int(skipped_num)
 
             elif "Total time:" in line:
                 total_time = _convert_time_to_seconds(
@@ -113,26 +113,14 @@ def analysis_log(log_file: Path):
                 )
                 analysis_res[1] = total_time
 
-            elif "JCG Time:" in line:
-                jcg_time = _convert_time_to_seconds(
-                    line.replace("\n", "").split("JCG Time:")[1].replace(" ", "")
-                )
-                analysis_res[2] += jcg_time
-
-            elif "nonAffectedClasses size" in line and " final time : " in line:
-                jcg_analysis_time = _convert_time_to_seconds(
-                    line.replace("\n", "").split(" final time : ")[1].replace(" ", "")
-                )
-                analysis_res[2] += jcg_analysis_time
-
             elif "Running " in line:
                 run_class = line.split("Running ")[1].replace("\n", "")
-                analysis_res[3].append(run_class)
+                analysis_res[2].append(run_class)
 
             elif "[RTS CHECK TAG]" in line:
                 output_class = line.replace("[RTS CHECK TAG] ", "").split(" -> ")[0]
                 if "$" in output_class:
                     output_class = output_class.split("$")[0]
-                analysis_res[4].add(output_class)
+                analysis_res[3].add(output_class)
 
     return analysis_res

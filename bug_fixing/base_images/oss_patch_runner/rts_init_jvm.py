@@ -5,14 +5,17 @@ RTS (Regression Test Selection) initialization script.
 This script performs one-time setup for RTS tools (Ekstazi, JcgEks, OpenClover) on Java projects:
 - Modifies pom.xml files to add surefire and RTS tool plugins
 - Configures surefire settings for RTS compatibility
+- Parses INCLUDE_TESTS and EXCLUDE_TESTS from $SRC/test.sh and adds to surefire configuration
 - Cleans up existing RTS artifacts
 - Commits changes to git
 
 Usage:
-    python rts_init.py [project_path] [--tool ekstazi|jcgeks|openclover]  # project_path defaults to current directory
+    python rts_init.py [project_path] [--tool ekstazi|jcgeks|openclover]
     python rts_init.py --install-deps  # Install Ekstazi and JcgEks dependencies only
-    python rts_init.py [project_path] --exclude-file /path/to/excludes.txt  # Add exclude patterns from file
-    python rts_init.py [project_path] --include-file /path/to/includes.txt  # Add include patterns from file
+
+/$SRC/test.sh format for INCLUDE_TESTS and EXCLUDE_TESTS:
+    INCLUDE_TESTS="**/Test1.java,**/Test2.java"
+    EXCLUDE_TESTS="**/FailingTest.java"
 
 Environment variables:
     RTS_TOOL: RTS tool to use (ekstazi, jcgeks, or openclover), default: jcgeks
@@ -25,8 +28,9 @@ import subprocess
 import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import tempfile
+import re
 
 # RTS tool configurations (ekstazi, jcgeks, and openclover supported)
 RTS_TOOLS = {
@@ -384,33 +388,83 @@ def find_pom_files(project_path: str) -> List[str]:
     return pom_files
 
 
-def read_exclude_patterns(exclude_file: str) -> List[str]:
+def read_patterns_from_file(pattern_file: str) -> List[str]:
     """
-    Read exclude patterns from a file (one pattern per line).
+    Read patterns from a file (one pattern per line).
 
     Args:
-        exclude_file: Path to the file containing exclude patterns
+        pattern_file: Path to the file containing patterns
 
     Returns:
-        List of exclude patterns (empty lines and comments starting with # are ignored)
+        List of patterns (empty lines and comments starting with # are ignored)
     """
     patterns = []
-    if not os.path.isfile(exclude_file):
-        print(f"[WARNING] Exclude file not found: {exclude_file}")
+    if not os.path.isfile(pattern_file):
+        print(f"[WARNING] Pattern file not found: {pattern_file}")
         return patterns
 
     try:
-        with open(exclude_file, "r") as f:
+        with open(pattern_file, "r") as f:
             for line in f:
                 line = line.strip()
                 # Skip empty lines and comments
                 if line and not line.startswith("#"):
                     patterns.append(line)
-        print(f"[INFO] Read {len(patterns)} exclude pattern(s) from {exclude_file}")
+        print(f"[INFO] Read {len(patterns)} pattern(s) from {pattern_file}")
     except Exception as e:
-        print(f"[ERROR] Failed to read exclude file {exclude_file}: {e}")
+        print(f"[ERROR] Failed to read pattern file {pattern_file}: {e}")
 
     return patterns
+
+
+def parse_test_patterns_from_test_sh(test_sh_path: str) -> tuple:
+    """
+    Parse INCLUDE_TESTS and EXCLUDE_TESTS variables from test.sh.
+
+    Expected format in test.sh:
+        INCLUDE_TESTS="**/Test1.java,**/Test2.java"
+        EXCLUDE_TESTS="**/FailingTest.java"
+
+    Args:
+        test_sh_path: Path to the test.sh file
+
+    Returns:
+        Tuple of (include_patterns, exclude_patterns) as lists
+    """
+    include_patterns = []
+    exclude_patterns = []
+
+    if not os.path.isfile(test_sh_path):
+        print(f"[WARNING] test.sh not found: {test_sh_path}")
+        return include_patterns, exclude_patterns
+
+    try:
+        with open(test_sh_path, "r") as f:
+            content = f.read()
+
+        # Parse INCLUDE_TESTS variable
+        # Match patterns like: INCLUDE_TESTS="..." or INCLUDE_TESTS='...'
+        include_match = re.search(r'INCLUDE_TESTS=["\']([^"\']*)["\']', content)
+        if include_match:
+            include_value = include_match.group(1).strip()
+            if include_value:
+                # Split by comma and strip whitespace
+                include_patterns = [p.strip() for p in include_value.split(",") if p.strip()]
+                print(f"[INFO] Parsed {len(include_patterns)} INCLUDE_TESTS pattern(s) from test.sh")
+
+        # Parse EXCLUDE_TESTS variable
+        exclude_match = re.search(r'EXCLUDE_TESTS=["\']([^"\']*)["\']', content)
+        if exclude_match:
+            exclude_value = exclude_match.group(1).strip()
+            if exclude_value:
+                # Split by comma and strip whitespace
+                exclude_patterns = [p.strip() for p in exclude_value.split(",") if p.strip()]
+                print(f"[INFO] Parsed {len(exclude_patterns)} EXCLUDE_TESTS pattern(s) from test.sh")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to parse test.sh {test_sh_path}: {e}")
+
+    return include_patterns, exclude_patterns
 
 
 def get_pom_tree_and_plugins(pom_path: str) -> tuple:
@@ -945,20 +999,22 @@ def git_commit_changes(project_path: str, tool_name: str) -> bool:
     return True
 
 
+# Fixed path to test.sh for parsing INCLUDE_TESTS and EXCLUDE_TESTS
+TEST_SH_PATH = "$SRC/test.sh"
+
+
 def init_rts(
     project_path: str,
     tool_name: str,
-    exclude_file: Optional[str] = None,
-    include_file: Optional[str] = None,
 ) -> bool:
     """
     Initialize RTS tool configuration for a Java project.
 
+    Parses INCLUDE_TESTS and EXCLUDE_TESTS from /$SRC/test.sh.
+
     Args:
         project_path: Path to the Java project root
         tool_name: RTS tool to use (ekstazi, jcgeks, or openclover)
-        exclude_file: Optional path to file containing exclude patterns (one per line)
-        include_file: Optional path to file containing include patterns (one per line)
 
     Returns:
         True if initialization succeeded, False otherwise
@@ -1017,32 +1073,31 @@ def init_rts(
     print("[INFO] Step 4: Configuring surefire settings...")
     configure_surefire_settings(project_path)
 
-    # Step 5: Add exclude patterns from file (if provided)
-    if exclude_file:
-        print(f"[INFO] Step 5a: Adding exclude patterns from {exclude_file}...")
-        exclude_patterns = read_exclude_patterns(exclude_file)
-        if exclude_patterns:
-            for pom_path in pom_files:
-                if add_excludes_to_surefire(pom_path, exclude_patterns):
-                    print(f"[INFO] Added excludes to: {pom_path}")
-                else:
-                    print(f"[WARNING] Failed to add excludes to: {pom_path}")
-        else:
-            print("[INFO] No exclude patterns to add")
+    # Step 5: Parse and add test patterns from $SRC/test.sh
+    print(f"[INFO] Step 5: Parsing test patterns from {TEST_SH_PATH}...")
+    include_patterns, exclude_patterns = parse_test_patterns_from_test_sh(TEST_SH_PATH)
 
-    # Step 5b: Add include patterns from file (if provided)
-    if include_file:
-        print(f"[INFO] Step 5b: Adding include patterns from {include_file}...")
-        # Reuse read_exclude_patterns - it just reads lines from a file
-        include_patterns = read_exclude_patterns(include_file)
-        if include_patterns:
-            for pom_path in pom_files:
-                if add_includes_to_surefire(pom_path, include_patterns):
-                    print(f"[INFO] Added includes to: {pom_path}")
-                else:
-                    print(f"[WARNING] Failed to add includes to: {pom_path}")
-        else:
-            print("[INFO] No include patterns to add")
+    # Add include patterns
+    if include_patterns:
+        print(f"[INFO] Step 5a: Adding {len(include_patterns)} include pattern(s) to surefire...")
+        for pom_path in pom_files:
+            if add_includes_to_surefire(pom_path, include_patterns):
+                print(f"[INFO] Added includes to: {pom_path}")
+            else:
+                print(f"[WARNING] Failed to add includes to: {pom_path}")
+    else:
+        print("[INFO] No INCLUDE_TESTS patterns found in test.sh")
+
+    # Add exclude patterns
+    if exclude_patterns:
+        print(f"[INFO] Step 5b: Adding {len(exclude_patterns)} exclude pattern(s) to surefire...")
+        for pom_path in pom_files:
+            if add_excludes_to_surefire(pom_path, exclude_patterns):
+                print(f"[INFO] Added excludes to: {pom_path}")
+            else:
+                print(f"[WARNING] Failed to add excludes to: {pom_path}")
+    else:
+        print("[INFO] No EXCLUDE_TESTS patterns found in test.sh")
 
     # Step 6: Commit changes to git
     print("[INFO] Step 6: Committing changes to git...")
@@ -1073,18 +1128,6 @@ def main():
         action="store_true",
         help="Install RTS dependencies only (Ekstazi and JcgEks, no project configuration)",
     )
-    parser.add_argument(
-        "--exclude-file",
-        type=str,
-        default=None,
-        help="Path to file containing exclude patterns (one regex/ant-style pattern per line)",
-    )
-    parser.add_argument(
-        "--include-file",
-        type=str,
-        default=None,
-        help="Path to file containing include patterns (one regex/ant-style pattern per line)",
-    )
 
     args = parser.parse_args()
 
@@ -1097,7 +1140,7 @@ def main():
         print(f"[ERROR] Project path does not exist: {args.project_path}")
         sys.exit(1)
 
-    success = init_rts(args.project_path, args.tool, args.exclude_file, args.include_file)
+    success = init_rts(args.project_path, args.tool)
     sys.exit(0 if success else 1)
 
 

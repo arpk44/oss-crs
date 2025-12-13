@@ -278,7 +278,7 @@ def get_crs_image_name(crs_name: str) -> str:
     return f"gcr.io/oss-patch/{crs_name}"
 
 
-def run_command(command: str, n: int = 5) -> None:
+def run_command(command: str, n: int = 5, log_file: Path | None = None) -> None:
     """
     Executes a command and dynamically updates the terminal to show
     only the last N lines of output in real-time.
@@ -286,6 +286,7 @@ def run_command(command: str, n: int = 5) -> None:
     Args:
         command (str): The command string to execute.
         n (int): The number of recent lines to keep and display. Defaults to 5.
+        log_file (Path | None): Optional path to log file to append output.
 
     Raises:
         subprocess.CalledProcessError: If the command exits with a non-zero status.
@@ -296,6 +297,9 @@ def run_command(command: str, n: int = 5) -> None:
         0  # Tracks how many lines we previously printed to manage cursor
     )
     first_output = True  # Flag to track if this is the first output
+
+    # Open log file if provided
+    log_handle = open(log_file, "a") if log_file else None
 
     # Get terminal width for calculating wrapped lines
     terminal_width = shutil.get_terminal_size(fallback=(80, 24)).columns
@@ -343,6 +347,11 @@ def run_command(command: str, n: int = 5) -> None:
         if process.stdout:
             for line in iter(process.stdout.readline, ""):
                 clean_line = line.strip()
+                # Log every line to file (including empty lines for completeness)
+                if log_handle:
+                    log_handle.write(line)
+                    log_handle.flush()
+
                 if clean_line:
                     # 1. Update the rolling buffer
                     recent_lines_buffer.append(clean_line)
@@ -397,6 +406,10 @@ def run_command(command: str, n: int = 5) -> None:
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         raise
+
+    finally:
+        if log_handle:
+            log_handle.close()
 
 
 def _build_docker_cache_builder_image() -> bool:

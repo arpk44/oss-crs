@@ -2,10 +2,12 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from datetime import datetime
 from .oss_patch import OSSPatch
 
 
 logger = logging.getLogger(__name__)
+LOG_FILE_HANDLER = None
 
 
 def _get_path_or_none(arg_str: str) -> Path | None:
@@ -35,6 +37,21 @@ def _setup_logger_config():
     )
 
 
+def _setup_file_logging(log_dir: Path, project_name: str) -> Path:
+    """Add file handler to root logger. Returns log file path."""
+    global LOG_FILE_HANDLER
+    timestamp = datetime.now().strftime("%y%m%d%H%M%S")
+    safe_name = project_name.replace("/", "_")
+    log_file = log_dir / f"test_inc_build_{safe_name}_{timestamp}.log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    LOG_FILE_HANDLER = logging.FileHandler(log_file)
+    LOG_FILE_HANDLER.setFormatter(logging.Formatter(CUSTOM_LOG_FORMAT, CUSTOM_DATE_FORMAT))
+    logging.getLogger().addHandler(LOG_FILE_HANDLER)
+
+    return log_file
+
+
 def main():  # pylint: disable=too-many-branches,too-many-return-statements
     """Gets subcommand from program arguments and does it. Returns 0 on success 1
     on error."""
@@ -62,8 +79,12 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
         )
     elif args.command == "test-inc-build":
         oss_patch = OSSPatch(args.project)
+        log_dir = Path(args.log_dir) if args.log_dir else oss_patch.work_dir / "logs"
+        log_file = _setup_file_logging(log_dir, args.project)
+        logger.info(f"Logging to: {log_file}")
         result = oss_patch.test_inc_build(
-            Path(args.oss_fuzz), with_rts=args.with_rts, rts_tool=args.rts_tool
+            Path(args.oss_fuzz), with_rts=args.with_rts, rts_tool=args.rts_tool,
+            log_file=log_file
         )
     # elif args.command == "run_pov":
     #     oss_patch = OSSPatch(args.project)
@@ -190,6 +211,11 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
         choices=["ekstazi", "jcgeks", "openclover"],
         default="jcgeks",
         help="RTS tool to use (default: jcgeks). Only used when --with-rts is specified.",
+    )
+    test_inc_build_parser.add_argument(
+        "--log-dir",
+        default=None,
+        help="Directory to save log files. Default: {work_dir}/logs/",
     )
 
     test_project_parser = subparsers.add_parser(

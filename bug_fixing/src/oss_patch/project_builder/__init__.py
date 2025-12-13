@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import re
 import os
+import sys
 from contextlib import contextmanager
 
 from bug_fixing.src.oss_patch.functions import (
@@ -136,6 +137,32 @@ def _workdir_from_dockerfile(project_path: Path, proj_name: str):
     return _workdir_from_lines(lines, default=os.path.join("/src", proj_name))
 
 
+def _run_subprocess_with_logging(
+    cmd: str | list,
+    log_file: Path | None = None,
+    shell: bool = True,
+    **kwargs
+) -> subprocess.CompletedProcess:
+    """Run subprocess, streaming output to both terminal and log file."""
+    logger.info(f"Running command: {cmd}")
+    if log_file:
+        output_lines = []
+        with open(log_file, "a") as f:
+            proc = subprocess.Popen(
+                cmd, shell=shell, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs
+            )
+            for line in iter(proc.stdout.readline, b""):
+                decoded = line.decode(errors="replace")
+                sys.stdout.write(decoded)
+                sys.stdout.flush()
+                f.write(decoded)
+                output_lines.append(line)
+            proc.wait()
+            return subprocess.CompletedProcess(cmd, proc.returncode, b"".join(output_lines), b"")
+    else:
+        return subprocess.run(cmd, shell=shell, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kwargs)
+
+
 class OSSPatchProjectBuilder:
     def __init__(
         self,
@@ -143,11 +170,13 @@ class OSSPatchProjectBuilder:
         project_name: str,
         oss_fuzz_path: Path,
         project_path: Path,
+        log_file: Path | None = None,
     ):
         self.work_dir = work_dir
         self.project_name = project_name
         self.oss_fuzz_path = oss_fuzz_path.resolve()
         self.project_path = project_path
+        self.log_file = log_file
 
         assert self.project_path.exists()
         assert (self.project_path / "project.yaml").exists()
@@ -177,20 +206,19 @@ class OSSPatchProjectBuilder:
     def build_fuzzers(
         self,
         source_path: Path | None = None,
+        use_inc_image: bool = False,
     ) -> tuple[bytes, bytes] | None:
         # logger.info(f'Execute `build_fuzzers` command for "{self.project_name}"')
 
-        if source_path:
-            command = f"python3 {self.oss_fuzz_path / 'infra/helper.py'} build_fuzzers {self.project_name} {source_path}"
-        else:
-            command = f"python3 {self.oss_fuzz_path / 'infra/helper.py'} build_fuzzers {self.project_name}"
+        command = f"python3 {self.oss_fuzz_path / 'infra/helper.py'} build_fuzzers {self.project_name}"
 
-        proc = subprocess.run(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+        if source_path:
+            command += f" {source_path}"
+
+        if use_inc_image:
+            command += " --docker_image_tag inc --no-build-image"
+
+        proc = _run_subprocess_with_logging(command, log_file=self.log_file)
 
         if proc.returncode == 0:
             return None
@@ -199,92 +227,46 @@ class OSSPatchProjectBuilder:
 
     def run_tests(
         self,
-        source_path: Path,
+        source_path: Path | None = None,
         rts_enabled: bool = False,
-        rts_tool: str = "jcgeks",
         log_file: Path | None = None,
+        use_inc_image: bool = False,
     ) -> tuple[bytes, bytes] | None:
-        """Run tests for the project.
+        """Run tests for the project using oss-fuzz helper.py run_test.
 
         Args:
-            source_path: Path to the project source
-            rts_enabled: Whether to enable RTS optimizations
-            rts_tool: RTS tool to use (ekstazi, jcgeks, or openclover)
-            log_file: Optional path to save combined stdout/stderr output
+            source_path: Path to the project source (optional, mounts local source if provided)
+            rts_enabled: Whether to enable RTS optimizations (uses RTS tool configured in image)
+            log_file: Optional path to save test-specific log (separate from main log)
+            use_inc_image: Whether to use incremental build image (:inc tag)
 
         Returns:
             None if successful, (stdout, stderr) tuple if failed
         """
-        test_sh_path = self.project_path / "test.sh"
-        if not test_sh_path.exists():
-            logger.error(f"test.sh not found: {test_sh_path}")
-            return (b"", b"test.sh not found")
+        # Build command: python3 infra/helper.py run_test PROJECT [SOURCE_PATH] [--rts]
+        command = f"python3 {self.oss_fuzz_path / 'infra/helper.py'} run_test {self.project_name}"
 
-        builder_image_name = get_builder_image_name(
-            self.oss_fuzz_path, self.project_name
-        )
-
-        workdir = _workdir_from_dockerfile(self.project_path, self.project_name)
-
-        docker_command = ["docker", "run"]
-        docker_command.append("--rm")
-
-        # Environment variables
-        if rts_enabled:
-            docker_command.extend(["-e", "RTS_ON=1", "-e", f"RTS_TOOL={rts_tool}"])
-
-        # Volume mounts
-        docker_command.extend([
-            "-v", f"{source_path}:/local-source-mount",
-            "-v", f"{test_sh_path}:/test-mnt.sh",
-        ])
+        if source_path:
+            command += f" {source_path}"
 
         if rts_enabled:
-            rts_config_path = OSS_PATCH_RUNNER_DATA_PATH / "rts_config_jvm.py"
-            if rts_config_path.exists():
-                docker_command.extend(["-v", f"{rts_config_path}:/rts_config_jvm.py:ro"])
+            command += " --rts"
 
-        # Mount exclude_tests.txt if it exists in project_path
-        exclude_tests_path = self.project_path / "exclude_tests.txt"
-        if exclude_tests_path.exists():
-            docker_command.extend(["-v", f"{exclude_tests_path}:/src/exclude_tests.txt:ro"])
+        if use_inc_image:
+            command += " --docker_image_tag inc"
 
-        # Mount include_tests.txt if it exists in project_path
-        include_tests_path = self.project_path / "include_tests.txt"
-        if include_tests_path.exists():
-            docker_command.extend(["-v", f"{include_tests_path}:/src/include_tests.txt:ro"])
+        proc = _run_subprocess_with_logging(command, log_file=self.log_file)
 
-        # Build container command
-        base_cmd = (
-            f"pushd $SRC && rm -rf {workdir} "
-            f"&& cp -r /local-source-mount {workdir} "
-            f"&& cp /test-mnt.sh $SRC/test.sh "
-            f"&& popd "
-        )
-
-        container_cmd = base_cmd + "&& bash $SRC/test.sh"
-
-        docker_command.extend([
-            builder_image_name,
-            "/bin/bash", "-c", container_cmd
-        ])
-
-        proc = subprocess.run(
-            docker_command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,  # Combine stderr into stdout
-        )
-
-        # Save combined output to log file if specified
+        # Save test-specific log file if specified (for RTS analysis)
         if log_file:
             log_file.parent.mkdir(parents=True, exist_ok=True)
             with open(log_file, "wb") as f:
-                f.write(proc.stdout)
+                f.write(proc.stdout if proc.stdout else b"")
 
         if proc.returncode == 0:
             return None
 
-        return (proc.stdout, proc.stderr if proc.stderr else b"")
+        return (proc.stdout if proc.stdout else b"", proc.stderr if proc.stderr else b"")
 
     def remove_builder_image(
         self, volume_name: str = OSS_PATCH_DOCKER_IMAGES_FOR_CRS
@@ -359,7 +341,7 @@ class OSSPatchProjectBuilder:
         #     f"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} {pull_cmd}"
         # )
 
-        run_command(pull_cmd)
+        run_command(pull_cmd, log_file=self.log_file)
 
         if not docker_image_exists(base_runner_image_name):
             logger.error(
@@ -391,7 +373,7 @@ class OSSPatchProjectBuilder:
 
         oss_fuzz_image_build_cmd = f"python3 {self.oss_fuzz_path / 'infra/helper.py'} build_image --no-pull {self.project_name}"
 
-        run_command(oss_fuzz_image_build_cmd)
+        run_command(oss_fuzz_image_build_cmd, log_file=self.log_file)
 
         if not docker_image_exists(builder_image_name):
             logger.error(f'"{builder_image_name}" does not exist in the docker daemon.')
@@ -456,6 +438,33 @@ class OSSPatchProjectBuilder:
         )
         container_name = f"{self.project_name.split('/')[-1]}-origin-{sanitizer}"
 
+        # test.sh is required
+        test_sh_path = self.project_path / "test.sh"
+        assert test_sh_path.exists(), f"test.sh not found: {test_sh_path}"
+
+        # Build container command
+        base_cmd = (
+            f"export PATH=/ccache/bin:\\$PATH && "
+            f"rsync -av \\$SRC/ {new_src_dir} && "
+            f"export SRC={new_src_dir} && "
+            f"cd {new_workdir} && "
+            f"chmod +x /usr/local/bin/compile && "
+            f"compile && "
+            f"cp -n /usr/local/bin/replay_build.sh \\$SRC/"
+        )
+
+        # Run test.sh after compile to preserve test build artifacts
+        container_cmd = base_cmd + f" && bash {new_src_dir}/test.sh"
+        logger.info("Will run test.sh after compile to preserve build artifacts")
+
+        # Build volume mounts (test.sh mounted to $SRC/test.sh)
+        volume_mounts = (
+            f"-v={self.oss_fuzz_path}/ccaches/{self.project_name}/ccache:/workspace/ccache "
+            f"-v={self.oss_fuzz_path}/build/out/{self.project_name}/:/out/ "
+            f"-v={source_path}:{_workdir_from_dockerfile(project_path, self.project_name)} "
+            f"-v={test_sh_path}:{new_src_dir}/test.sh:ro "
+        )
+
         try:
             create_container_command = (
                 f"docker create --privileged --net=host "
@@ -464,11 +473,9 @@ class OSSPatchProjectBuilder:
                 f"--env=FUZZING_LANGUAGE={self.project_lang} "
                 f"--env=CAPTURE_REPLAY_SCRIPT=1 "
                 f"--name={container_name} "
-                f"-v={self.oss_fuzz_path}/ccaches/{self.project_name}/ccache:/workspace/ccache "
-                f"-v={self.oss_fuzz_path}/build/out/{self.project_name}/:/out/ "
-                f"-v={source_path}:{_workdir_from_dockerfile(project_path, self.project_name)} "
+                f"{volume_mounts}"
                 f"{builder_image_name} "
-                f'/bin/bash -c "export PATH=/ccache/bin:\\$PATH && rsync -av \\$SRC/ {new_src_dir} && export SRC={new_src_dir} && cd {new_workdir} && chmod +x /usr/local/bin/compile && compile && cp -n /usr/local/bin/replay_build.sh \\$SRC/"'
+                f'/bin/bash -c "{container_cmd}"'
             )
 
             proc = subprocess.run(
@@ -520,16 +527,15 @@ class OSSPatchProjectBuilder:
                     logger.error("Installing patched compile script has failed")
                     return False
 
-            proc = subprocess.run(
+            proc = _run_subprocess_with_logging(
                 f"docker start -a {container_name}",
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                log_file=self.log_file,
             )
             if proc.returncode != 0:
                 logger.error("docker start command has failed")
                 return False
 
+            # Commit with :inc tag to distinguish from original image
             commit_command = (
                 f"docker container commit "
                 f'-c "ENV REPLAY_ENABLED=1" '
@@ -537,7 +543,7 @@ class OSSPatchProjectBuilder:
                 f'-c "ENV SRC={new_src_dir}" '
                 f'-c "WORKDIR {new_workdir}" '
                 f'-c "CMD [\\"compile\\"]" '
-                f"{container_name} {builder_image_name}"
+                f"{container_name} {builder_image_name}:inc"
             )
 
             proc = subprocess.run(
@@ -583,67 +589,54 @@ class OSSPatchProjectBuilder:
         )
         container_name = f"{self.project_name.split('/')[-1]}-origin-{sanitizer}"
 
+        extension_path = OSS_PATCH_RUNNER_DATA_PATH / "extensions.xml"
+
+        # test.sh is required
+        test_sh_path = self.project_path / "test.sh"
+        assert test_sh_path.exists(), f"test.sh not found: {test_sh_path}"
+
         # Build the container command
         base_cmd = (
             f"rsync -av \\$SRC/ {new_src_dir} && "
             f"export SRC={new_src_dir} && "
             f"cd {new_workdir} && "
+            f"mkdir -p .mvn && "
+            f"cp /tmp/extensions.xml .mvn/extensions.xml && "
             f"chmod +x /usr/local/bin/compile && "
             f"compile"
         )
 
-        # Check if exclude_tests.txt and include_tests.txt exist
-        exclude_tests_path = self.project_path / "exclude_tests.txt"
-        exclude_tests_exists = exclude_tests_path.exists()
-        include_tests_path = self.project_path / "include_tests.txt"
-        include_tests_exists = include_tests_path.exists()
-
         if rts_enabled:
             # Add RTS initialization after compile
-            # test.sh and rts_init_jvm.py are mounted at /tmp/
-            exclude_file_opt = " --exclude-file /src/exclude_tests.txt" if exclude_tests_exists else ""
-            include_file_opt = " --include-file /src/include_tests.txt" if include_tests_exists else ""
+            # rts_init_jvm.py and rts_config_jvm.py are copied to root (/)
+            # test.sh is expected to be in $SRC/
             rts_cmd = (
-                f" && python3 /tmp/rts_init_jvm.py {new_workdir} --tool {rts_tool}{exclude_file_opt}{include_file_opt} && bash /src/test.sh"
+                f" && python3 /rts_init_jvm.py {new_workdir} --tool {rts_tool} && bash {new_src_dir}/test.sh"
             )
             container_cmd = base_cmd + rts_cmd
         else:
-            container_cmd = base_cmd
+            container_cmd = base_cmd + f" && bash {new_src_dir}/test.sh"
+
+        # Validate RTS files early if enabled
+        if rts_enabled:
+            rts_init_path = OSS_PATCH_RUNNER_DATA_PATH / "rts_init_jvm.py"
+            rts_config_path = OSS_PATCH_RUNNER_DATA_PATH / "rts_config_jvm.py"
 
         try:
             # Build volume mounts
+            # - rts_init_jvm.py: mount (only needed during snapshot, not in final image)
+            # - rts_config_jvm.py: docker cp (must be in final image for later test runs)
+            # - test.sh: mount (only needed during snapshot)
             volume_mounts = (
                 f"-v={self.oss_fuzz_path}/ccaches/{self.project_name}/ccache:/workspace/ccache "
                 f"-v={self.oss_fuzz_path}/build/out/{self.project_name}/:/out/ "
                 f"-v={source_path}:{_workdir_from_dockerfile(project_path, self.project_name)} "
+                f"-v={test_sh_path}:{new_src_dir}/test.sh:ro "
+                f"-v={self.oss_fuzz_path}/build/tmp/{self.project_name}/:/tmp/ "
+                f"-v={extension_path}:/tmp/extensions.xml:ro "
             )
-
-            # Add RTS file mounts if enabled
             if rts_enabled:
-                rts_init_path = OSS_PATCH_RUNNER_DATA_PATH / "rts_init_jvm.py"
-                test_sh_path = self.project_path / "test.sh"
-
-                if not rts_init_path.exists():
-                    logger.error(f"RTS file not found: {rts_init_path}")
-                    return False
-                if not test_sh_path.exists():
-                    logger.error(f"test.sh not found: {test_sh_path}")
-                    return False
-
-                volume_mounts += f"-v={rts_init_path}:/tmp/rts_init_jvm.py:ro "
-                volume_mounts += f"-v={test_sh_path}:/src/test.sh:ro "
-                logger.info("rts_init_jvm.py mounted to /tmp/rts_init_jvm.py")
-                logger.info("test.sh mounted to /src/test.sh")
-
-                # Mount exclude_tests.txt if it exists
-                if exclude_tests_exists:
-                    volume_mounts += f"-v={exclude_tests_path}:/src/exclude_tests.txt:ro "
-                    logger.info(f"exclude_tests.txt mounted to /src/exclude_tests.txt")
-
-                # Mount include_tests.txt if it exists
-                if include_tests_exists:
-                    volume_mounts += f"-v={include_tests_path}:/src/include_tests.txt:ro "
-                    logger.info(f"include_tests.txt mounted to /src/include_tests.txt")
+                volume_mounts += f"-v={rts_init_path}:/rts_init_jvm.py:ro "
 
             create_container_command = (
                 f"docker create --privileged --net=host "
@@ -684,9 +677,21 @@ class OSSPatchProjectBuilder:
                     logger.error("Installing patched compile script has failed")
                     return False
 
-            proc = subprocess.run(
+            # Copy rts_config_jvm.py via docker cp before starting container (must be in final image)
+            if rts_enabled:
+                proc = subprocess.run(
+                    f"docker cp {rts_config_path} {container_name}:/rts_config_jvm.py",
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if proc.returncode != 0:
+                    logger.error("Installing rts_config_jvm.py has failed")
+                    return False
+
+            proc = _run_subprocess_with_logging(
                 f"docker start -a {container_name}",
-                shell=True,
+                log_file=self.log_file,
             )
             if proc.returncode != 0:
                 logger.error("docker start command has failed")
@@ -701,12 +706,13 @@ class OSSPatchProjectBuilder:
                 env_options += f'-c "ENV RTS_ON=1" '
                 env_options += f'-c "ENV RTS_TOOL={rts_tool}" '
 
+            # Commit with :inc tag to distinguish from original image
             commit_command = (
                 f"docker container commit "
                 f"{env_options}"
                 f'-c "WORKDIR {new_workdir}" '
                 f'-c "CMD [\\"compile\\"]" '
-                f"{container_name} {builder_image_name}"
+                f"{container_name} {builder_image_name}:inc"
             )
 
             proc = subprocess.run(

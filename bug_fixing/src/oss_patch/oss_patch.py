@@ -3,7 +3,7 @@ from .crs_builder import OSSPatchCRSBuilder
 from .project_builder import OSSPatchProjectBuilder
 from .crs_runner import OSSPatchCRSRunner
 from .inc_build_checker import IncrementalBuildChecker
-from .globals import OSS_PATCH_WORK_DIR, DEFAULT_PROJECT_SOURCE_PATH
+from .globals import OSS_PATCH_WORK_DIR
 from .functions import (
     prepare_docker_cache_builder,
     pull_project_source,
@@ -56,7 +56,7 @@ class OSSPatch:
         )
 
         if not source_path:
-            source_path = DEFAULT_PROJECT_SOURCE_PATH
+            source_path = self.work_dir / "project-src"
 
             if source_path.exists():
                 change_ownership_with_docker(source_path)
@@ -125,23 +125,15 @@ class OSSPatch:
         with_rts: bool = False,
         rts_tool: str = "jcgeks",
         source_path: Path | None = None,
+        log_file: Path | None = None,
     ) -> bool:
         oss_fuzz_path = oss_fuzz_path.resolve()
         if source_path:
             source_path = source_path.resolve()
 
         checker = IncrementalBuildChecker(
-            oss_fuzz_path, self.project_name, self.work_dir
+            oss_fuzz_path, self.project_name, self.work_dir, log_file=log_file
         )
 
-        # Run basic incremental build test
-        if not checker.test():
-            return False
-
-        # If RTS test is requested, run it after inc_build test
-        if with_rts:
-            logger.info(f"Running RTS benchmark with tool '{rts_tool}'...")
-            if not checker.test_with_rts(rts_tool=rts_tool):
-                return False
-
-        return True
+        # Run incremental build test (with RTS if requested)
+        return checker.test(with_rts=with_rts, rts_tool=rts_tool)
