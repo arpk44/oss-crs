@@ -72,7 +72,7 @@ def temp_build_context(path_name="temp_data"):
                 pass
 
 
-def _clone_project_repo(proj_yaml_path: Path, dst_path: Path) -> bool:
+def _clone_project_repo(proj_yaml_path: Path, dst_path: Path, use_gitcache: bool = False) -> bool:
     if not proj_yaml_path.exists():
         logger.error(f'Target project "{proj_yaml_path}" not found')
         return False
@@ -88,7 +88,8 @@ def _clone_project_repo(proj_yaml_path: Path, dst_path: Path) -> bool:
         f'Cloning the target project repository from "{yaml_data["main_repo"]}" to "{dst_path}"'
     )
 
-    clone_command = f"git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
+    git_prefix = "gitcache " if use_gitcache else ""
+    clone_command = f"{git_prefix}git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
     # @TODO: how to properly handle `--shallow-submodules --recurse-submodules` options
 
     try:

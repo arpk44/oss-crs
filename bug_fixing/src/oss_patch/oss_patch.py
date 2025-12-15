@@ -55,6 +55,7 @@ class OSSPatch:
         local_crs: Path | None = None,
         registry_path: Path | None = None,
         overwrite: bool = False,
+        use_gitcache: bool = False,
     ) -> bool:
         assert self.crs_name
 
@@ -66,6 +67,7 @@ class OSSPatch:
             self.work_dir,
             local_crs=local_crs,
             registry_path=registry_path,
+            use_gitcache=use_gitcache,
         )
         if not crs_builder.build():
             return False
@@ -106,7 +108,7 @@ class OSSPatch:
                 change_ownership_with_docker(source_path)
                 shutil.rmtree(source_path)
 
-            pull_project_source(project_path, source_path)
+            pull_project_source(project_path, source_path, use_gitcache)
 
         assert source_path.exists()
         assert is_git_repository(source_path)

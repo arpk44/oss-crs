@@ -78,10 +78,10 @@ def change_ownership_with_docker(target_path: Path) -> bool:
         return False
 
 
-def pull_project_source(project_path: Path, dst_path: Path) -> bool:
+def pull_project_source(project_path: Path, dst_path: Path, use_gitcache: bool = False) -> bool:
     assert project_path.exists()
 
-    if not _clone_project_repo(project_path, dst_path):
+    if not _clone_project_repo(project_path, dst_path, use_gitcache):
         logger.error("Cloning target project source code has failed.")
         return False
 
@@ -92,7 +92,7 @@ def pull_project_source(project_path: Path, dst_path: Path) -> bool:
     return True
 
 
-def _clone_project_repo(project_path: Path, dst_path: Path) -> bool:
+def _clone_project_repo(project_path: Path, dst_path: Path, use_gitcache: bool = False) -> bool:
     proj_yaml_path = project_path / "project.yaml"
     if not proj_yaml_path.exists():
         logger.error(f'Target project "{proj_yaml_path}" not found')
@@ -109,7 +109,8 @@ def _clone_project_repo(project_path: Path, dst_path: Path) -> bool:
         f'Cloning the target project repository from "{yaml_data["main_repo"]}" to "{dst_path}"'
     )
 
-    clone_command = f"git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
+    git_prefix = "gitcache " if use_gitcache else ""
+    clone_command = f"{git_prefix}git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
     # @TODO: how to properly handle `--shallow-submodules --recurse-submodules` options
 
     try:

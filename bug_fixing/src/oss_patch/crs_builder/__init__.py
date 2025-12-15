@@ -36,12 +36,14 @@ class OSSPatchCRSBuilder:
         work_dir: Path,
         local_crs: Path | None = None,
         registry_path: Path | None = None,
+        use_gitcache: bool = False,
     ):
         self.crs_name = crs_name
         self.work_dir = work_dir
         self.crs_path = local_crs
         # Default to crs_registry using importlib.resources (same as bug_finding)
         self.registry_path = registry_path if registry_path else OSS_CRS_REGISTRY_PATH
+        self.use_gitcache = use_gitcache
 
     def build(self, volume_name: str = OSS_PATCH_CRS_SYSTEM_IMAGES) -> bool:
         logger.info(f'Getting CRS metadata for "{self.crs_name}"...')
@@ -114,12 +116,13 @@ class OSSPatchCRSBuilder:
         """Pull CRS repository"""
 
         crs_url, crs_ref = _parse_pkg_yaml(pkg_yaml_path)
-        run_command(f"git clone {crs_url} {self.crs_path}")
+        git_prefix = "gitcache " if self.use_gitcache else ""
+        run_command(f"{git_prefix}git clone {crs_url} {self.crs_path}")
         if crs_ref is not None:
             run_command(f"git -C {self.crs_path} checkout {crs_ref}")
 
         run_command(
-            f"git -C {self.crs_path} submodule update --init --recursive --depth 1"
+            f"{git_prefix}git -C {self.crs_path} submodule update --init --recursive --depth 1"
         )
 
         return True

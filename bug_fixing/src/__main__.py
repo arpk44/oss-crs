@@ -51,6 +51,7 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
             _get_path_or_none(args.local_crs),
             _get_path_or_none(args.registry),
             args.overwrite,
+            args.gitcache,
         )
     elif args.command == "run":
         oss_patch = OSSPatch(args.project, crs_name=args.crs)
@@ -132,6 +133,11 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
         "--overwrite",
         action="store_true",
         help="Overwrite existing oss-fuzz and project directories if they exist",
+    )
+    build_crs_parser.add_argument(
+        "--gitcache",
+        action="store_true",
+        help="Use gitcache for git clone and submodule operations",
     )
 
     build_crs_parser.set_defaults(clean=False)
