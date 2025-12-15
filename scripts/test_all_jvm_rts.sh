@@ -8,7 +8,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OSS_CRS_DIR="$(dirname "$SCRIPT_DIR")"
 
-OSS_FUZZ_PATH="/mnt/ssd2/acorn421/team-atlanta/crsbench/oss-fuzz"
+if [ -z "$1" ]; then
+    echo "Usage: $0 <OSS_FUZZ_PATH>"
+    exit 1
+fi
+
+OSS_FUZZ_PATH="$1"
 JVM_PROJECTS_DIR="$OSS_FUZZ_PATH/projects/aixcc/jvm"
 
 # RTS tools to test
