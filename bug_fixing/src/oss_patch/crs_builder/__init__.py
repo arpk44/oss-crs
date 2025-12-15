@@ -40,6 +40,7 @@ class OSSPatchCRSBuilder:
         self.crs_name = crs_name
         self.work_dir = work_dir
         self.crs_path = local_crs
+        # Default to crs_registry using importlib.resources (same as bug_finding)
         self.registry_path = registry_path if registry_path else OSS_CRS_REGISTRY_PATH
 
     def build(self, volume_name: str = OSS_PATCH_CRS_SYSTEM_IMAGES) -> bool:
