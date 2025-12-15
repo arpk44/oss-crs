@@ -311,6 +311,7 @@ def install_rts_artifacts(artifacts: list, tool_name: str, mvn: str) -> bool:
                     "install:install-file",
                     f"-Dfile={jar_path}",
                     f"-DpomFile={pom_path}",
+                    "-DgeneratePom=true",
                 ]
 
             # Execute install command
