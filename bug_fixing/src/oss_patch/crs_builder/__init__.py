@@ -35,10 +35,12 @@ class OSSPatchCRSBuilder:
         crs_name: str,
         work_dir: Path,
         local_crs: Path | None = None,
+        registry_path: Path | None = None,
     ):
         self.crs_name = crs_name
         self.work_dir = work_dir
         self.crs_path = local_crs
+        self.registry_path = registry_path if registry_path else OSS_CRS_REGISTRY_PATH
 
     def build(self, volume_name: str = OSS_PATCH_CRS_SYSTEM_IMAGES) -> bool:
         logger.info(f'Getting CRS metadata for "{self.crs_name}"...')
@@ -84,13 +86,13 @@ class OSSPatchCRSBuilder:
         return True
 
     def _get_crs_yamls(self) -> tuple[Path, Path] | None:
-        assert OSS_CRS_REGISTRY_PATH.exists()
+        assert self.registry_path.exists()
 
-        crs_registry_path = OSS_CRS_REGISTRY_PATH / self.crs_name
+        crs_registry_path = self.registry_path / self.crs_name
 
         if not crs_registry_path.exists():
             logger.error(
-                f'CRS registry for "{self.crs_name}" does not exist in "{OSS_CRS_REGISTRY_PATH}".'
+                f'CRS registry for "{self.crs_name}" does not exist in "{self.registry_path}".'
             )
             return None
 

@@ -34,6 +34,7 @@ class OSSPatch:
         project_path: Path | None = None,
         source_path: Path | None = None,
         local_crs: Path | None = None,
+        registry_path: Path | None = None,
     ) -> bool:
         assert self.crs_name
 
@@ -44,6 +45,7 @@ class OSSPatch:
             self.crs_name,
             self.work_dir,
             local_crs=local_crs,
+            registry_path=registry_path,
         )
         if not crs_builder.build():
             return False

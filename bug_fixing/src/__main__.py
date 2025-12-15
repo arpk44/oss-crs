@@ -49,6 +49,7 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
             _get_path_or_none(args.project_path),
             _get_path_or_none(args.source_path),
             _get_path_or_none(args.local_crs),
+            _get_path_or_none(args.registry),
         )
     elif args.command == "run":
         oss_patch = OSSPatch(args.project, crs_name=args.crs)
@@ -119,6 +120,11 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
         help="Path to pre-cloned source code directory "
         "(alternative to cloning from project.yaml main_repo). "
         "Requires --project-path",
+        default=None,
+    )
+    build_crs_parser.add_argument(
+        "--registry",
+        help="Path to CRS registry directory (default: ../crs_registry relative to package)",
         default=None,
     )
 
