@@ -27,7 +27,7 @@ def _detect_crash_report(stdout: str, language: str) -> bool:
         elif "FuzzerSecurityIssueLow: Stack overflow" in stdout:
             return True
         else:
-            return extract_java_exception_report(stdout) is not None
+            return (extract_java_exception_report(stdout) is not None) or (extract_sanitizer_report(stdout) is not None)
     else:
         return False
 
