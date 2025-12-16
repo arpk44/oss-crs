@@ -27,7 +27,7 @@ def _detect_crash_report(stdout: str, language: str) -> bool:
         elif "FuzzerSecurityIssueLow: Stack overflow" in stdout:
             return True
         else:
-            return extract_java_exception_report(stdout) is not None
+            return (extract_java_exception_report(stdout) is not None) or (extract_sanitizer_report(stdout) is not None)
     else:
         return False
 
@@ -80,11 +80,6 @@ class IncrementalBuildChecker:
             change_ownership_with_docker(proj_src_path)
             shutil.rmtree(proj_src_path)
         pull_project_source(self.project_path, proj_src_path)
-
-        # Check RTS compatibility
-        if with_rts and self.project_builder.project_lang != "jvm":
-            logger.warning("RTS is only supported for JVM projects, disabling RTS")
-            with_rts = False
 
         logger.info(
             f'create project builder image: "{get_builder_image_name(self.oss_fuzz_path, self.project_name)}"'
@@ -472,6 +467,25 @@ class IncrementalBuildChecker:
             log_and_collect("[Test Results]")
             log_and_collect(f"  Baseline - Total Runs: {baseline_tests:.1f}, Failures: {baseline_failures}, Errors: {baseline_errors}, Skipped: {baseline_skips}")
             log_and_collect(f"  {mode_label} (avg) - Total Runs: {avg_tests:.1f}, Failures: {avg_failures:.1f}, Errors: {avg_errors:.1f}, Skipped: {avg_skips:.1f}")
+
+            # RTS-specific warnings
+            if with_rts:
+                log_and_collect("-" * 60)
+                log_and_collect("[Warnings]")
+                has_warning = False
+
+                # Warning: RTS selected zero tests
+                if avg_tests == 0:
+                    log_and_collect("  WARNING: RTS selected 0 tests - all tests were skipped!")
+                    has_warning = True
+
+                # Warning: RTS did not reduce test count (same as baseline)
+                elif abs(avg_tests - baseline_tests) < 0.5:  # tolerance for floating point comparison
+                    log_and_collect("  WARNING: RTS did not reduce test count - same as baseline!")
+                    has_warning = True
+
+                if not has_warning:
+                    log_and_collect("  No warnings.")
 
         log_and_collect("=" * 60)
 
