@@ -638,10 +638,16 @@ class OSSPatchProjectBuilder:
             if rts_enabled:
                 volume_mounts += f"-v={rts_init_path}:/rts_init_jvm.py:ro "
 
-            create_container_command = (
-                f"docker create --privileged --net=host "
+            env_options = (
                 f"--env=SANITIZER={sanitizer} "
                 f"--env=FUZZING_LANGUAGE={self.project_lang} "
+            )
+            if rts_enabled:
+                env_options += f"--env=RTS_ON=1 --env=RTS_TOOL={rts_tool} "
+
+            create_container_command = (
+                f"docker create --privileged --net=host "
+                f"{env_options}"
                 f"--name={container_name} "
                 f"{volume_mounts}"
                 f"{builder_image_name} "

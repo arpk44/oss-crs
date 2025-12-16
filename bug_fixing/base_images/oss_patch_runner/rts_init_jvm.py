@@ -514,7 +514,7 @@ def create_surefire_plugin(project_name: str, tool_name: str) -> ET.Element:
     )
 
     # OpenClover doesn't use excludesFile - it handles test selection internally
-    if tool_name not in ("rtscheck", "openclover"):
+    if tool_name not in ("openclover"):
         configuration = ET.SubElement(plugin, "configuration")
         excludes_file = ET.SubElement(configuration, "excludesFile")
         # Use unique exclude file path per project and tool
@@ -1001,7 +1001,7 @@ def git_commit_changes(project_path: str, tool_name: str) -> bool:
 
 
 # Fixed path to test.sh for parsing INCLUDE_TESTS and EXCLUDE_TESTS
-TEST_SH_PATH = "$SRC/test.sh"
+TEST_SH_PATH = "/built-src/test.sh"
 
 
 def init_rts(
