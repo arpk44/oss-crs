@@ -10,15 +10,17 @@ OSS_CRS_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Default values
 JOBS=1
+PROJECT_LIST=""
 
 usage() {
-    echo "Usage: $0 <OSS_FUZZ_PATH> [-j|--jobs N]"
+    echo "Usage: $0 <OSS_FUZZ_PATH> [-j|--jobs N] [-l|--list FILE]"
     echo ""
     echo "Arguments:"
     echo "  OSS_FUZZ_PATH    Path to OSS-Fuzz directory"
     echo ""
     echo "Options:"
     echo "  -j, --jobs N     Number of parallel jobs (default: 1)"
+    echo "  -l, --list FILE  File containing project names (one per line)"
     echo "  -h, --help       Show this help message"
     exit 1
 }
@@ -35,6 +37,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         -j|--jobs)
             JOBS="$2"
+            shift 2
+            ;;
+        -l|--list)
+            PROJECT_LIST="$2"
             shift 2
             ;;
         -h|--help)
@@ -58,7 +64,17 @@ JVM_PROJECTS_DIR="$OSS_FUZZ_PATH/projects/aixcc/jvm"
 RTS_TOOLS=("jcgeks" "openclover")
 
 # Get list of projects
-projects=($(ls -d "$JVM_PROJECTS_DIR"/*/ 2>/dev/null | xargs -n1 basename))
+if [ -n "$PROJECT_LIST" ]; then
+    if [ ! -f "$PROJECT_LIST" ]; then
+        echo "Error: Project list file not found: $PROJECT_LIST"
+        exit 1
+    fi
+    # Read projects from file (skip empty lines and comments)
+    mapfile -t projects < <(grep -v '^#' "$PROJECT_LIST" | grep -v '^[[:space:]]*$')
+    echo "Project list: $PROJECT_LIST"
+else
+    projects=($(ls -d "$JVM_PROJECTS_DIR"/*/ 2>/dev/null | xargs -n1 basename))
+fi
 
 cd "$OSS_CRS_DIR"
 
