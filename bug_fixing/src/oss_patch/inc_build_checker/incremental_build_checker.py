@@ -233,6 +233,7 @@ class IncrementalBuildChecker:
             harness_name = pov_per_harness_dir.name
 
             for pov_path in pov_per_harness_dir.iterdir():
+                change_ownership_with_docker(source_path)
                 if not reset_repository(source_path):
                     logger.error("Repository reset has failed...")
                     return False
