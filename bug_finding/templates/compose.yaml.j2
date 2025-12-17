@@ -77,6 +77,7 @@ services:
 {%- if crs.host_docker_builder %}
       - HOST_WORK_DIR={{ build_dir }}/work/{{ crs.name }}/{{ project }}
       - HOST_OUT_DIR={{ build_dir }}/out/{{ crs.name }}/{{ project }}
+      - HOST_ARTIFACT_DIR={{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}
       - HOST_CRS_DIR={{ crs.path }}
 {%- endif %}
 {{ crs_network() }}
@@ -98,6 +99,10 @@ services:
 {%- endif %}
 {%- if crs.host_docker_builder %}
       - /var/run/docker.sock:/var/run/docker.sock
+      # Same-path mounts for host docker socket mode - paths match on host and container
+      - {{ build_dir }}/out/{{ crs.name }}/{{ project }}:{{ build_dir }}/out/{{ crs.name }}/{{ project }}
+      - {{ build_dir }}/work/{{ crs.name }}/{{ project }}:{{ build_dir }}/work/{{ crs.name }}/{{ project }}
+      - {{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}:{{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}
 {%- endif %}
 {%- for vol in crs.volumes %}
       - {{ vol }}
