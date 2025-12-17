@@ -333,13 +333,17 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
         crs_dependencies = crs_pkg_data.get(crs_name, {}).get('dependencies', [])
         crs_dind = 'dind' in crs_dependencies if crs_dependencies else False
 
+        # Get volumes from CRS config-crs.yaml
+        crs_volumes = crs_pkg_data.get(crs_name, {}).get('volumes', [])
+
         result.append({
             'name': crs_name,
             'path': crs_paths[crs_name],
             'cpuset': format_cpu_list(crs_cpus_list),
             'memory_limit': format_memory(crs_memory_mb),
             'suffix': 'runner',
-            'dind': crs_dind
+            'dind': crs_dind,
+            'volumes': crs_volumes
         })
 
     # Process auto-divide CRS instances
@@ -389,13 +393,17 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
             crs_dependencies = crs_pkg_data.get(crs_name, {}).get('dependencies', [])
             crs_dind = 'dind' in crs_dependencies if crs_dependencies else False
 
+            # Get volumes from CRS config-crs.yaml
+            crs_volumes = crs_pkg_data.get(crs_name, {}).get('volumes', [])
+
             result.append({
                 'name': crs_name,
                 'path': crs_paths[crs_name],
                 'cpuset': format_cpu_list(crs_cpus_list),
                 'memory_limit': format_memory(crs_memory),
                 'suffix': 'runner',
-                'dind': crs_dind
+                'dind': crs_dind,
+                'volumes': crs_volumes
             })
 
     return result

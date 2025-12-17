@@ -91,6 +91,9 @@ services:
 {%- if crs.dind %}
       - {{ build_dir }}/crs/parent-images/{{ project }}.tar:/project-image.tar:ro
 {%- endif %}
+{%- for vol in crs.volumes %}
+      - {{ vol }}
+{%- endfor %}
 {%- if source_path %}
       - {{ source_path }}:/local-source-mount
 {%- endif %}
@@ -127,6 +130,9 @@ services:
 {%- if diff_path %}
       - {{ diff_path }}:/ref.diff:ro
 {%- endif %}
+{%- for vol in crs.volumes %}
+      - {{ vol }}
+{%- endfor %}
     cpuset: {{ crs.cpuset }}
     deploy:
       resources:
