@@ -74,6 +74,11 @@ services:
       - PROJECT_NAME={{ project }}
       - FUZZING_LANGUAGE={{ project_language }}
       - HELPER=True
+{%- if crs.host_docker_builder %}
+      - HOST_WORK_DIR={{ build_dir }}/work/{{ crs.name }}/{{ project }}
+      - HOST_OUT_DIR={{ build_dir }}/out/{{ crs.name }}/{{ project }}
+      - HOST_CRS_DIR={{ crs.path }}
+{%- endif %}
 {{ crs_network() }}
     build:
       context: {{ crs.path }}

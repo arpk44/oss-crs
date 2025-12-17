@@ -2,8 +2,7 @@ crs-multilang:
   models: []
   dependencies:
     - dind
+  host_docker_builder: true
   modes:
     - full
     - delta
-  volumes:
-    - ${CRS_CACHE_DIR}:/cache/images:ro
