@@ -615,7 +615,8 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
             hints_dir: Path = None,
             harness_source: Path = None,
             diff_path: Path = None,
-            external_litellm: bool = False, source_oss_fuzz_dir: Path = None):
+            external_litellm: bool = False, source_oss_fuzz_dir: Path = None,
+            shared_seed_dir: Path = None, no_shared_seed_dir: bool = False):
     """
     Run CRS using docker compose.
 
@@ -637,6 +638,8 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
         diff_path: Optional path to diff file (Path, already resolved)
         external_litellm: Use external LiteLLM instance (default: False)
         source_oss_fuzz_dir: Optional source OSS-Fuzz directory to copy from (Path, already resolved)
+        shared_seed_dir: Optional base directory for shared seeds (Path, already resolved)
+        no_shared_seed_dir: Disable automatic shared seed directory for ensemble mode
 
     Returns:
         bool: True if successful, False otherwise
@@ -657,6 +660,38 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
     if not _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
         return False
 
+    # Determine shared_seed_dir for ensemble mode
+    final_shared_seed_dir = None
+    if not no_shared_seed_dir:
+        if shared_seed_dir:
+            final_shared_seed_dir = shared_seed_dir
+        else:
+            # Check if ensemble mode (>1 CRS on same worker)
+            config_resource_path = config_dir / 'config-resource.yaml'
+            with open(config_resource_path) as f:
+                resource_config = yaml.safe_load(f)
+            crs_configs = resource_config.get('crs', {})
+            worker_crs_count = sum(
+                1 for cfg in crs_configs.values()
+                if worker in cfg.get('workers', [])
+            )
+            if worker_crs_count > 1:
+                final_shared_seed_dir = build_dir / 'shared' / project_name
+                logger.info(f'Ensemble mode detected ({worker_crs_count} CRS on worker {worker}). '
+                           f'Shared seeds directory: {final_shared_seed_dir}')
+
+    # Create per-CRS directories if shared seed is enabled
+    if final_shared_seed_dir:
+        config_resource_path = config_dir / 'config-resource.yaml'
+        with open(config_resource_path) as f:
+            resource_config = yaml.safe_load(f)
+        crs_configs = resource_config.get('crs', {})
+        for crs_name, cfg in crs_configs.items():
+            if worker in cfg.get('workers', []):
+                crs_seed_dir = final_shared_seed_dir / crs_name
+                crs_seed_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f'Created shared seed directory for {crs_name}: {crs_seed_dir}')
+
     # Generate compose files using render_compose module
     logger.info('Generating compose-%s.yaml', worker)
     fuzzer_command = [fuzzer_name] + fuzzer_args
@@ -674,7 +709,8 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
             fuzzer_command=fuzzer_command,
             harness_source=str(harness_source) if harness_source else None,
             diff_path=str(diff_path) if diff_path else None,
-            external_litellm=external_litellm
+            external_litellm=external_litellm,
+            shared_seed_dir=str(final_shared_seed_dir) if final_shared_seed_dir else None
         )
         crs_build_dir = Path(crs_build_dir)
     except Exception as e:
