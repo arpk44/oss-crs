@@ -224,6 +224,14 @@ The CRS may assume the diff has already been applied to the source code.
 
 When multiple CRS instances run on the same worker (ensemble mode), OSS-CRS automatically enables cross-CRS seed sharing. This allows CRS implementations to share discovered test inputs with each other, improving overall fuzzing coverage.
 
+**Host directory structure**:
+```
+build/shared_seed_dir/{project}/{harness_name}/
+├── atlantis-c-libafl/    # CRS 1's seeds
+├── crs-libfuzzer/        # CRS 2's seeds
+└── ...
+```
+
 **Container mount structure**:
 ```
 /seed_share_dir/
@@ -250,14 +258,15 @@ crs-libfuzzer_runner:
     - <path-to-build>/out/crs-libfuzzer/json-c:/out
     - <hash>_keys_data_crs-libfuzzer:/keys:ro
     # Shared seeds - own directory is rw, others are ro
-    - <path-to-build>/shared/json-c/crs-libfuzzer:/seed_share_dir/crs-libfuzzer:rw
-    - <path-to-build>/shared/json-c/atlantis-c-libafl:/seed_share_dir/atlantis-c-libafl:ro
+    - <path-to-build>/shared_seed_dir/json-c/json_array_fuzzer/crs-libfuzzer:/seed_share_dir/crs-libfuzzer:rw
+    - <path-to-build>/shared_seed_dir/json-c/json_array_fuzzer/atlantis-c-libafl:/seed_share_dir/atlantis-c-libafl:ro
 ```
 
 **Notes**:
 - The `/seed_share_dir/` mount only exists when ensemble mode is active (>1 CRS on same worker)
 - CRS implementations should gracefully handle the case when `/seed_share_dir/` does not exist
 - Seed sharing is enabled by default for ensemble mode but can be disabled with `--no-shared-seed-dir`
+- Seeds are organized by harness name on the host to prevent mixing seeds from different fuzzers
 
 ## Operator configuration files
 

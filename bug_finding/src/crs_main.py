@@ -664,7 +664,8 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
     final_shared_seed_dir = None
     if not no_shared_seed_dir:
         if shared_seed_dir:
-            final_shared_seed_dir = shared_seed_dir
+            # User-provided path - append harness name
+            final_shared_seed_dir = shared_seed_dir / fuzzer_name
         else:
             # Check if ensemble mode (>1 CRS on same worker)
             config_resource_path = config_dir / 'config-resource.yaml'
@@ -676,7 +677,7 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
                 if worker in cfg.get('workers', [])
             )
             if worker_crs_count > 1:
-                final_shared_seed_dir = build_dir / 'shared' / project_name
+                final_shared_seed_dir = build_dir / 'shared_seed_dir' / project_name / fuzzer_name
                 logger.info(f'Ensemble mode detected ({worker_crs_count} CRS on worker {worker}). '
                            f'Shared seeds directory: {final_shared_seed_dir}')
 
