@@ -226,16 +226,86 @@ if [ ! -f "$WORK/lib/libjbig.a" ]; then
 fi
 ```
 
+### 12. Guard `sed -i` Insertions with Pattern Checks
+
+When using `sed -i` to insert content, check BOTH the original pattern exists AND the new content doesn't exist yet.
+
+```bash
+# BAD - Only checks if new content exists (can't distinguish original vs added)
+if ! grep -q '%destructor' file.y; then
+    sed -i '/^%%$/i%destructor { free ($$); } ID' file.y
+fi
+
+# GOOD - Check original pattern exists AND new content not yet added
+if grep -q '^%%$' file.y && ! grep -q '%destructor' file.y; then
+    sed -i '/^%%$/i%destructor { free ($$); } ID' file.y
+fi
+```
+
+### 13. Guard Append Operations (`>>`)
+
+Don't blindly use `>` (overwrite) or `>>` (append). Check if content already exists.
+
+```bash
+# BAD - Overwrites every time (inefficient, may lose state)
+sed 's/main/old_main/' file.c > header.h
+
+# BAD - Appends every time (file grows on each run)
+sed 's/main/old_main/' file.c >> header.h
+
+# GOOD - Only append if content not already present
+if ! grep -q 'old_main' header.h 2>/dev/null; then
+    sed 's/main/old_main/' file.c >> header.h
+fi
+```
+
+### 14. CMake/Ninja Build Directory Must Use $SRC-Relative Path
+
+When `$SRC` changes between build.sh and test.sh, CMake/Ninja will fail with "manifest dirty" errors if build directory is in `$WORK`.
+
+```bash
+# BAD - $WORK is shared, CMake source path mismatch causes ninja errors
+BUILD_DIR="$WORK/build"
+cd "$BUILD_DIR"
+cmake $SRC/project  # Source path recorded as /built-src/project
+# On test.sh: ninja fails because $SRC is now /test-src/project
+
+# GOOD - Build directory relative to $SRC, each environment independent
+BUILD_DIR="$SRC/project_build"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+if [ ! -f build.ninja ]; then
+    cmake -GNinja $SRC/project
+fi
+ninja
+```
+
+### 15. Disable ccache for Bazel Builds
+
+Bazel has its own caching mechanism. ccache interferes with Bazel's compiler wrappers.
+
+```bash
+# BAD - ccache causes "invalid option" errors with Bazel
+# Error: /usr/local/bin/ccache: invalid option -- 'U'
+bazel build //...
+
+# GOOD - Remove ccache from PATH before Bazel builds
+export PATH=$(echo "$PATH" | sed 's|/ccache/bin:||g; s|:/ccache/bin||g')
+unset CC CXX
+export CC=clang
+export CXX=clang++
+bazel build //...
+```
+
 ## Standard test.sh Template
+
+**IMPORTANT: Execution Environment**
+- `$SRC` is **already set** (no need for `: "${SRC:=/src}"`)
+- Working directory is **already `$SRC/{project}`** (no need for `cd $SRC/{project}`)
 
 ```bash
 #!/bin/bash
-set -e
-
-# test.sh for {project}
-# $SRC is separate from build.sh (build.sh uses /built-src, test.sh uses /test-src)
-
-cd $SRC/{project}
+set -ex
 
 # Build (only configure on first run)
 if [ ! -f Makefile ]; then
@@ -256,9 +326,7 @@ echo "Tests completed"
 
 ```bash
 #!/bin/bash
-set -e
-
-cd $SRC/project
+set -ex
 
 if [ ! -f Makefile ]; then
     autoreconf -fi
@@ -266,17 +334,13 @@ if [ ! -f Makefile ]; then
 fi
 make -j$(nproc)
 make -k check || true
-
-echo "Tests completed"
 ```
 
 ### CMake Project
 
 ```bash
 #!/bin/bash
-set -e
-
-cd $SRC/project
+set -ex
 
 if [ ! -f Makefile ]; then
     cmake . -DCMAKE_INSTALL_PREFIX=$WORK -DBUILD_SHARED_LIBS=off
@@ -289,9 +353,7 @@ make test
 
 ```bash
 #!/bin/bash
-set -e
-
-cd $SRC/project
+set -ex
 
 # Build zlib (only on first run)
 if [ ! -f "$WORK/lib/libz.a" ]; then
@@ -314,9 +376,7 @@ make test
 
 ```bash
 #!/bin/bash
-set -e
-
-cd $SRC/jq
+set -ex
 
 # Copy submodule if not present (conditional, not delete-and-copy)
 if [ ! -d modules/oniguruma ]; then
@@ -335,8 +395,6 @@ make -j$(nproc)
 
 # Run tests (some may fail in fuzzing environment)
 make -k check || true
-
-echo "Tests completed"
 ```
 
 ## Common Errors and Fixes
@@ -352,6 +410,10 @@ echo "Tests completed"
 | `No rule to make target 'jbig.h'` | Original build.sh used `mv` to move files | Rewrite to use `cp` instead |
 | `tiff.dict: No such file` | Dict/corpus file doesn't exist | Use conditional copy: `[ -f file ] && cp file dest \|\| true` |
 | `No rule to make target 'all'` in submodule | `rm -rf && rsync` deleted submodule's Makefile | Use conditional copy: `if [ ! -d dir ]; then cp; fi` |
+| `%destructor redeclaration` / duplicate content | `sed -i` insertion runs every time | Guard with pattern check: `if grep -q 'pattern' && ! grep -q 'new_content'` |
+| File grows on each build | `>>` append runs every time | Guard append: `if ! grep -q 'content' file; then ... >> file; fi` |
+| `ninja: manifest 'build.ninja' still dirty` | CMake source path mismatch ($SRC changed) | Use `$SRC`-relative build dir instead of `$WORK` |
+| `ccache: invalid option -- 'U'` | ccache interferes with Bazel | Remove ccache from PATH: `export PATH=$(echo "$PATH" \| sed 's\|/ccache/bin:\|\|g')` |
 
 ## Testing Incremental Builds
 
@@ -360,10 +422,23 @@ Use the `test-inc-build` command to verify scripts work on both first run and re
 ```bash
 # From oss-crs directory
 uv run oss-bugfix-crs test-inc-build {project_name} ../oss-fuzz
+```
 
-# Examples
-uv run oss-bugfix-crs test-inc-build atlanta-jq-delta-01 ../oss-fuzz
-uv run oss-bugfix-crs test-inc-build atlanta-libtiff-full-01 ../oss-fuzz
+### AIXCC Projects: Use Full Path Prefix
+
+**IMPORTANT: For AIXCC projects, use the `aixcc/c/` or `aixcc/jvm/` prefix in the project name.**
+
+Do NOT create symlinks. The tool expects the full path prefix:
+
+```bash
+# C/C++ AIXCC projects - use aixcc/c/ prefix
+uv run oss-bugfix-crs test-inc-build aixcc/c/afc-sqlite3-delta-01 ../oss-fuzz
+uv run oss-bugfix-crs test-inc-build aixcc/c/atlanta-libjpeg-full-01 ../oss-fuzz
+uv run oss-bugfix-crs test-inc-build aixcc/c/afc-shadowsocks-full-01 ../oss-fuzz
+
+# JVM AIXCC projects - use aixcc/jvm/ prefix
+uv run oss-bugfix-crs test-inc-build aixcc/jvm/afc-jenkins-delta-01 ../oss-fuzz
+uv run oss-bugfix-crs test-inc-build aixcc/jvm/atlanta-tika-full-01 ../oss-fuzz
 ```
 
 This command:
@@ -375,6 +450,20 @@ This command:
 **Success criteria:**
 - Both runs complete without errors
 - Build time reduction is reported (higher % = better incremental build support)
+
+### Parallel Testing Multiple Projects
+
+When testing multiple projects, use **background tasks** to run tests in parallel:
+
+```bash
+# Run multiple tests in parallel using background tasks (with aixcc/c/ prefix)
+uv run oss-bugfix-crs test-inc-build aixcc/c/afc-libexif-delta-01 ../oss-fuzz &
+uv run oss-bugfix-crs test-inc-build aixcc/c/afc-libexif-delta-02 ../oss-fuzz &
+uv run oss-bugfix-crs test-inc-build aixcc/c/afc-libexif-delta-03 ../oss-fuzz &
+wait  # Wait for all background tasks to complete
+```
+
+**In Claude Code:** Use the `run_in_background` parameter when calling the Bash tool to launch tests in parallel, then use `TaskOutput` to retrieve results when complete.
 
 ## Checklist
 
@@ -389,4 +478,8 @@ This command:
 - [ ] Dict/corpus copies use conditional: `[ -f file ] && cp ... || true`
 - [ ] Tests use `make -k check || true` if some may fail
 - [ ] Internal build.sh rewritten if it uses `mv` or non-idempotent operations
+- [ ] `sed -i` insertions guarded with pattern + content check
+- [ ] Append operations (`>>`) guarded with content existence check
+- [ ] CMake/Ninja build directories use `$SRC`-relative paths (not `$WORK`)
+- [ ] Bazel builds have ccache removed from PATH
 - [ ] Works on first run AND repeated runs
