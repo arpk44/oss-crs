@@ -19,6 +19,7 @@ from pathlib import Path
 from importlib.resources import files
 from typing import Dict, Any, List, Optional, Tuple
 
+from dotenv import dotenv_values
 from jinja2 import Template
 
 from .utils import run_git
@@ -58,6 +59,22 @@ def check_image_exists(image_name: str, check_any_tag: bool = False) -> bool:
         return bool(result.stdout.strip())
 
     return False
+
+
+def get_crs_env_vars(config_dir: Path) -> List[str]:
+    """Extract CRS_* prefixed variable names from .env file.
+
+    Args:
+        config_dir: Directory containing the .env file
+
+    Returns:
+        Sorted list of environment variable names starting with 'CRS_'
+    """
+    env_file = config_dir / ".env"
+    if not env_file.exists():
+        return []
+    env_vars = dotenv_values(str(env_file))
+    return sorted([k for k in env_vars.keys() if k.startswith('CRS_')])
 
 
 @dataclass
@@ -634,6 +651,9 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
     if source_path:
         source_tag = hashlib.sha256(source_path.encode() + project.encode()).hexdigest()[:12]
 
+    # Get CRS_* environment variables from .env
+    crs_env_vars = get_crs_env_vars(config_dir)
+
     rendered = template.render(
         crs_list=crs_list,
         worker_name=worker_name,
@@ -656,7 +676,8 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
         diff_path=diff_path,
         parent_image_prefix=project_image_prefix,
         external_litellm=external_litellm,
-        shared_seed_dir=shared_seed_dir
+        shared_seed_dir=shared_seed_dir,
+        crs_env_vars=crs_env_vars
     )
 
     return rendered

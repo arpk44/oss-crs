@@ -74,6 +74,9 @@ services:
       - PROJECT_NAME={{ project }}
       - FUZZING_LANGUAGE={{ project_language }}
       - HELPER=True
+{%- for var in crs_env_vars %}
+      - {{ var }}={{ '${' }}{{ var }}{{ ':-}' }}
+{%- endfor %}
 {%- if crs.host_docker_builder %}
       - HOST_WORK_DIR={{ build_dir }}/work/{{ crs.name }}/{{ project }}
       - HOST_OUT_DIR={{ build_dir }}/out/{{ crs.name }}/{{ project }}
@@ -130,6 +133,9 @@ services:
       - MEMORY_LIMIT={{ crs.memory_limit | string }}
       - CRS_TARGET={{ project }}
       - CRS_NAME={{ crs.name }}
+{%- for var in crs_env_vars %}
+      - {{ var }}={{ '${' }}{{ var }}{{ ':-}' }}
+{%- endfor %}
 {%- if crs.host_docker_builder %}
       - HOST_OUT_DIR={{ build_dir }}/out/{{ crs.name }}/{{ project }}
       - HOST_ARTIFACT_DIR={{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}
