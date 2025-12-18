@@ -463,16 +463,18 @@ class OSSPatchProjectBuilder:
             f"cp -n /usr/local/bin/replay_build.sh \\$SRC/"
         )
 
+        patch_apply_sh_path = OSS_PATCH_RUNNER_DATA_PATH / "patch_apply.sh"
+
         # Run test.sh after compile to preserve test build artifacts
         if rts_enabled:
             # Add RTS initialization after compile
             # rts_init_c.py is mounted to root (/), test.sh is expected to be in $SRC/
             rts_cmd = (
-                f" && python3 /rts_init_c.py {new_workdir} && bash {new_src_dir}/test.sh"
+                f" && python3 /rts_init_c.py {new_workdir} || :; bash /patch_apply.sh && SRC=/test-src bash {new_src_dir}/test.sh"
             )
             container_cmd = base_cmd + rts_cmd
         else:
-            container_cmd = base_cmd + f" && bash {new_src_dir}/test.sh"
+            container_cmd = base_cmd + f" && bash /patch_apply.sh && SRC=/test-src bash {new_src_dir}/test.sh"
         logger.info("Will run test.sh after compile to preserve build artifacts")
 
         # Build volume mounts (test.sh mounted to $SRC/test.sh)
@@ -481,6 +483,7 @@ class OSSPatchProjectBuilder:
             f"-v={self.oss_fuzz_path}/build/out/{self.project_name}/:/out/ "
             f"-v={source_path}:{_workdir_from_dockerfile(project_path, self.project_name)} "
             f"-v={test_sh_path}:/src/test.sh:ro "
+            f"-v={patch_apply_sh_path}:/patch_apply.sh:ro "
         )
         if rts_enabled:
             rts_init_path = OSS_PATCH_RUNNER_DATA_PATH / "rts_init_c.py"
@@ -634,16 +637,18 @@ class OSSPatchProjectBuilder:
             f"compile"
         )
 
+        patch_apply_sh_path = OSS_PATCH_RUNNER_DATA_PATH / "patch_apply.sh"
+
         if rts_enabled:
             # Add RTS initialization after compile
             # rts_init_jvm.py and rts_config_jvm.py are copied to root (/)
             # test.sh is expected to be in $SRC/
             rts_cmd = (
-                f" && python3 /rts_init_jvm.py {new_workdir} --tool {rts_tool} && bash {new_src_dir}/test.sh"
+                f" && python3 /rts_init_jvm.py {new_workdir} --tool {rts_tool} && bash /patch_apply.sh && bash {new_src_dir}/test.sh"
             )
             container_cmd = base_cmd + rts_cmd
         else:
-            container_cmd = base_cmd + f" && bash {new_src_dir}/test.sh"
+            container_cmd = base_cmd + f" && bash /patch_apply.sh && bash {new_src_dir}/test.sh"
 
         # Validate RTS files early if enabled
         if rts_enabled:
@@ -662,6 +667,7 @@ class OSSPatchProjectBuilder:
                 f"-v={test_sh_path}:/src/test.sh:ro "
                 f"-v={self.oss_fuzz_path}/build/tmp/{self.project_name}/:/tmp/ "
                 f"-v={extension_path}:/tmp/extensions.xml:ro "
+                f"-v={patch_apply_sh_path}:/patch_apply.sh:ro "
             )
             if rts_enabled:
                 volume_mounts += f"-v={rts_init_path}:/rts_init_jvm.py:ro "
