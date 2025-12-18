@@ -30,6 +30,22 @@ KEY_PROVISIONER_DIR = files(__package__).parent / "key_provisioner"
 logging.basicConfig(level=logging.WARNING, format='%(message)s')
 
 
+def check_image_exists(image_name: str) -> bool:
+    """Check if Docker image exists locally.
+
+    Args:
+        image_name: Full Docker image name (e.g., 'json-c_crs-multilang_builder:abc123')
+
+    Returns:
+        True if image exists locally, False otherwise
+    """
+    result = subprocess.run(
+        ['docker', 'image', 'inspect', image_name],
+        capture_output=True
+    )
+    return result.returncode == 0
+
+
 @dataclass
 class ComposeEnvironment:
     """Environment data for compose rendering."""
@@ -471,18 +487,16 @@ def _setup_compose_environment(config_dir: str, build_dir: str, oss_fuzz_path: s
         config_content = f.read()
     config_hash = hashlib.sha256(config_content).hexdigest()[:16]
 
-    # Create/validate crs_build_dir
+    # Create crs_build_dir (used for compose files and other outputs)
+    # Note: For run mode, build validation is done via Docker image existence check
+    # in render_run_compose() after we have the project/CRS information
     crs_build_dir = build_dir / 'crs' / config_hash
+    crs_build_dir.mkdir(parents=True, exist_ok=True)
     if mode == 'build':
-        crs_build_dir.mkdir(parents=True, exist_ok=True)
         logging.info(f'Using CRS build directory: {crs_build_dir}')
-    else:  # mode == 'run'
-        if not crs_build_dir.exists():
-            raise FileNotFoundError(f'CRS build directory not found: {crs_build_dir}. Please run build first.')
 
     # Output directory is the crs_build_dir
     output_dir = crs_build_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Verify crs_registry exists
     if not registry_dir_path.exists():
@@ -753,6 +767,24 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
 
     if not crs_list:
         raise ValueError(f"No CRS instances configured for worker '{worker}'")
+
+    # Validate that CRS builder images exist (validates build was run)
+    # Compute source_tag if source_path is provided
+    source_tag = None
+    if source_path:
+        source_tag = hashlib.sha256(source_path.encode() + project.encode()).hexdigest()[:12]
+
+    for crs in crs_list:
+        crs_name = crs['name']
+        builder_image = f"{project}_{crs_name}_builder"
+        if source_tag:
+            builder_image += f":{source_tag}"
+
+        if not check_image_exists(builder_image):
+            raise FileNotFoundError(
+                f"CRS builder image not found: {builder_image}. "
+                f"Please run 'oss-crs build' first to build the CRS."
+            )
 
     # Render compose-litellm.yaml (unless using external LiteLLM)
     if not external_litellm:
