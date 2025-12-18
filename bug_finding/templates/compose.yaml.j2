@@ -158,6 +158,15 @@ services:
 {%- for vol in crs.volumes %}
       - {{ vol }}
 {%- endfor %}
+{%- if shared_seed_dir %}
+      # Shared seeds - own directory is rw, others are ro
+      - {{ shared_seed_dir }}/{{ crs.name }}:/seed_share_dir/{{ crs.name }}:rw
+{%- for other_crs in crs_list %}
+{%- if other_crs.name != crs.name %}
+      - {{ shared_seed_dir }}/{{ other_crs.name }}:/seed_share_dir/{{ other_crs.name }}:ro
+{%- endif %}
+{%- endfor %}
+{%- endif %}
     cpuset: {{ crs.cpuset }}
     deploy:
       resources:
