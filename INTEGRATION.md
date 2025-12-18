@@ -90,6 +90,21 @@ atlantis-c-bullseye:
     - delta
 ```
 
+For CRS that need to mount additional host directories (e.g., model caches, shared data), use `volumes`:
+```yaml
+crs-multilang:
+  volumes:
+    - /path/to/models:/models:ro
+    - /shared/cache:/cache:rw
+```
+
+For CRS that need to spawn Docker containers using the host Docker daemon, use `host_docker_builder`:
+```yaml
+crs-multilang:
+  host_docker_builder: true
+```
+See [Host Docker Socket Mode](#host-docker-socket-mode-host_docker_builder) for details and security considerations.
+
 ## CRS entrypoint
 
 We expect the CRS to expose two entrypoints: `builder.Dockerfile` and `runner.Dockerfile`.
@@ -214,6 +229,56 @@ it is provided as `/project-image.tar` inside the build container.
 
 The `mock-dind` CRS is provided as an example of the docker image exporting and loading workflow.
 
+### Host Docker Socket Mode (`host_docker_builder`)
+
+An alternative to DinD for CRS that need to spawn Docker containers. Instead of running a nested Docker daemon, the host's Docker socket is mounted into the container.
+
+**Configuration** (`config-crs.yaml`):
+```yaml
+crs-multilang:
+  host_docker_builder: true
+```
+
+**Behavior**:
+- Mounts `/var/run/docker.sock` into builder and runner containers
+- Provides environment variables for path mapping:
+  - `HOST_WORK_DIR` - Host path for `/work` directory
+  - `HOST_OUT_DIR` - Host path for `/out` directory (build outputs)
+  - `HOST_ARTIFACT_DIR` - Host path for `/artifacts` directory (persistent results)
+- Creates same-path volume mounts so container paths match host paths
+- Sets `CRS_EXTERNAL_NETWORK` for LiteLLM connectivity
+
+**Advantages over DinD**:
+- Instant layer caching (host daemon's cache is immediately available)
+- No image loading overhead (images built once are available everywhere)
+- Simpler architecture (no nested daemons to manage)
+
+**Trade-offs**:
+- Requires path translation between container and host paths
+- Host Docker daemon is shared with CRS-spawned containers
+
+> **Security Warning**: Mounting the host Docker socket gives the container root-equivalent access to the host system. The container can:
+> - Access and modify any container on the host
+> - Mount host filesystems
+> - Execute commands with host-level privileges
+>
+> Only use `host_docker_builder: true` with trusted CRS implementations. This option is intended for controlled environments where the CRS code is trusted.
+
+**CRS developer requirements**:
+- Use `HOST_WORK_DIR`, `HOST_OUT_DIR`, `HOST_ARTIFACT_DIR` environment variables when constructing Docker volume mounts
+- Connect spawned containers to `CRS_EXTERNAL_NETWORK` if they need LiteLLM access
+
+**Container cleanup consideration**:
+
+When using host Docker socket, containers spawned by the CRS are siblings (not children) on the host Docker daemon. If the runner container is killed externally (e.g., timeout, SIGKILL), these spawned containers may continue running as orphans.
+
+CRS implementations should consider implementing a cleanup mechanism, such as:
+- A cleanup sidecar container that monitors the runner and stops all services when runner exits
+- Signal handlers that gracefully stop spawned containers before exit
+- Using `docker compose down` in trap handlers
+
+See crs-multilang's `cleanup` sidecar in `docker-compose.yml` for a reference implementation.
+
 ### Delta mode
 
 In delta mode, when OSS-CRS is provided the `--diff` option,
@@ -276,8 +341,21 @@ In order to help the operator get started, we provide sample configurations in t
 `example_configs/` directory.
 
 CRS developers may optionally add sample configurations for their CRS.
-For running OSS-CRS for debugging purposes, 
+For running OSS-CRS for debugging purposes,
 developers should at least modify one `config-resource.yaml` to include their CRS.
+
+### CRS-specific environment variables
+
+Environment variables with `CRS_` prefix in the operator's `.env` file are automatically passed to both builder and runner containers. This allows operators to configure CRS-specific behavior without modifying the CRS code.
+
+**Example** (`.env`):
+```bash
+CRS_CACHE_DIR=/path/to/cache
+CRS_INPUT_GENS=given_fuzzer,mlla
+CRS_SKIP_SAVE=True
+```
+
+All `CRS_*` variables are extracted from `.env` and passed to containers as environment variables.
 
 ## Output format
 
