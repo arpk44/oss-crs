@@ -271,6 +271,51 @@ uv run oss-bugfind-crs build --clone \
 - Standard OSS-Fuzz projects already clone source in their Dockerfile, so `--clone` is not needed for them
 - The `project.yaml` must contain a `main_repo` field with a valid git URL
 
+### Gitcache Support (`--gitcache`)
+
+Both `bug_finding` and `bug_fixing` packages support [gitcache](https://github.com/seeraven/gitcache) to accelerate git clone operations through local caching.
+
+Gitcache is a tool that caches git repositories locally and serves them via HTTP. This significantly speeds up repeated git clone operations, which is especially useful when:
+- Repeatedly building CRSs (clones CRS repositories from registry)
+- Cloning OSS-Fuzz repository
+- Cloning project sources with `--clone`
+- Working with large repositories or slow network connections
+
+**Installation:**
+
+```bash
+# Install gitcache (requires Python)
+pip install gitcache
+```
+
+**Usage:**
+
+```bash
+# Build with gitcache
+uv run oss-bugfind-crs build --gitcache example_configs/ensemble-c json-c
+
+# Run with gitcache
+uv run oss-bugfind-crs run --gitcache example_configs/ensemble-c json-c json_array_fuzzer
+
+# Bug fixing with gitcache
+uv run oss-bugfix-crs build --gitcache my-crs my-project --oss-fuzz ~/oss-fuzz
+```
+
+**How it works:**
+
+When `--gitcache` is enabled, all git operations (clone, checkout, submodule update) are prefixed with `gitcache`, which:
+1. Checks if the repository is cached locally
+2. If cached, serves it from the local cache (fast)
+3. If not cached, clones from remote and caches it for future use
+
+**Affected operations:**
+- CRS repository cloning (from registry)
+- OSS-Fuzz repository cloning
+- Project source cloning (when using `--clone`)
+- Git submodule updates
+
+For more information about gitcache, see: https://github.com/seeraven/gitcache
+
 ## Supported CRSs
 
 - **`atlantis-c-libafl`** - LibAFL-based Atlantis-C for C projects
