@@ -27,6 +27,24 @@ KEY_PROVISIONER_DIR = files(__package__).parent / "key_provisioner"
 # Configure logging (INFO level won't show by default)
 logging.basicConfig(level=logging.WARNING, format='%(message)s')
 
+# Global gitcache setting
+USE_GITCACHE = False
+
+
+def set_gitcache(enabled: bool):
+    """Set global gitcache mode."""
+    global USE_GITCACHE
+    USE_GITCACHE = enabled
+
+
+def run_git(args: List[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run git command, optionally with gitcache prefix."""
+    if USE_GITCACHE:
+        cmd = f"gitcache git {' '.join(args)}"
+        return subprocess.run(cmd, shell=True, check=True, **kwargs)
+    else:
+        return subprocess.run(['git'] + args, check=True, **kwargs)
+
 
 @dataclass
 class ComposeEnvironment:
@@ -211,12 +229,12 @@ def clone_crs_if_needed(crs_name: str, crs_build_dir: Path, registry_dir: Path) 
         # Clone the CRS repository from URL
         logging.info(f"Cloning CRS '{crs_name}' from {crs_url}")
         try:
-            subprocess.check_call(['git', 'clone', crs_url, str(crs_path)], stdout=subprocess.DEVNULL)
+            run_git(['clone', crs_url, str(crs_path)], stdout=subprocess.DEVNULL)
 
             if crs_ref:
-                subprocess.check_call(['git', '-C', str(crs_path), 'checkout', crs_ref], stdout=subprocess.DEVNULL)
-                subprocess.check_call(['git', '-C', str(crs_path), 'submodule', 'update',
-                                       '--init', '--recursive', '--depth', '1'], stdout=subprocess.DEVNULL)
+                run_git(['-C', str(crs_path), 'checkout', crs_ref], stdout=subprocess.DEVNULL)
+                run_git(['-C', str(crs_path), 'submodule', 'update',
+                         '--init', '--recursive', '--depth', '1'], stdout=subprocess.DEVNULL)
 
             logging.info(f"Successfully cloned CRS '{crs_name}' to {crs_path}")
             return crs_path

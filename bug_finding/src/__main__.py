@@ -47,6 +47,8 @@ def main():
                               help='Overwrite existing project in oss-fuzz/projects/ when using project_path')
     build_parser.add_argument('--clone', action='store_true',
                               help='Clone project source from main_repo in project.yaml (for custom projects)')
+    build_parser.add_argument('--gitcache', action='store_true',
+                              help='Use gitcache for git clone operations')
 
     # run_crs subcommand
     run_parser = subparsers.add_parser('run', help='Run CRS')
@@ -78,6 +80,8 @@ def main():
                             help='Path to diff file for analysis')
     run_parser.add_argument('--external-litellm', action='store_true',
                             help='Use external LiteLLM instance (requires LITELLM_URL and LITELLM_KEY env vars)')
+    run_parser.add_argument('--gitcache', action='store_true',
+                            help='Use gitcache for git clone operations')
 
     args = parser.parse_args()
 
@@ -99,6 +103,10 @@ def main():
 
     # Resolve source oss-fuzz directory if provided (for copying)
     source_oss_fuzz_dir = args.oss_fuzz_dir.resolve() if args.oss_fuzz_dir else None
+
+    # Set gitcache mode for render_compose
+    from . import render_compose
+    render_compose.set_gitcache(args.gitcache)
 
     if args.command == 'build':
         # Build kwargs, only including non-None optional arguments
