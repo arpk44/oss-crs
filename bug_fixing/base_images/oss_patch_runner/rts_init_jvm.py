@@ -52,6 +52,7 @@ RTS_TOOLS = {
 }
 
 MAVEN_NAMESPACE = "http://maven.apache.org/POM/4.0.0"
+MAVEN_SETTINGS_NAMESPACE = "http://maven.apache.org/SETTINGS/1.0.0"
 SUREFIRE_VERSION = "2.22.2"
 
 # OpenClover internal class exclude pattern
@@ -200,6 +201,85 @@ def format_xml_with_xmllint(file_path: str) -> bool:
         return False
     except Exception as e:
         print(f"[WARNING] Failed to format {file_path}: {e}")
+        return False
+
+
+def configure_maven_settings_for_openclover() -> bool:
+    """
+    Configure Maven settings.xml to include org.openclover pluginGroup.
+
+    This prevents Maven from resolving 'clover' goals to the old Clover 2.4
+    (org.apache.maven.plugins:maven-clover-plugin) instead of OpenClover.
+
+    Creates ~/.m2/settings.xml if it doesn't exist, or adds the pluginGroup
+    to existing settings.xml.
+
+    Returns:
+        True if configuration succeeded, False otherwise
+    """
+    m2_dir = os.path.expanduser("~/.m2")
+    settings_path = os.path.join(m2_dir, "settings.xml")
+    openclover_plugin_group = "org.openclover"
+
+    ns = "{" + MAVEN_SETTINGS_NAMESPACE + "}"
+
+    try:
+        # Create .m2 directory if it doesn't exist
+        if not os.path.exists(m2_dir):
+            os.makedirs(m2_dir)
+            print(f"[INFO] Created directory: {m2_dir}")
+
+        if os.path.exists(settings_path):
+            # Parse existing settings.xml
+            tree = ET.parse(settings_path)
+            root = tree.getroot()
+            ET.register_namespace("", MAVEN_SETTINGS_NAMESPACE)
+
+            # Find or create pluginGroups element
+            plugin_groups = root.find(ns + "pluginGroups")
+            if plugin_groups is None:
+                plugin_groups = root.find("pluginGroups")
+            if plugin_groups is None:
+                plugin_groups = ET.SubElement(root, "pluginGroups")
+                print("[INFO] Created <pluginGroups> element in settings.xml")
+
+            # Check if org.openclover already exists
+            existing_groups = set()
+            for pg in plugin_groups:
+                if pg.text:
+                    existing_groups.add(pg.text.strip())
+
+            if openclover_plugin_group not in existing_groups:
+                plugin_group = ET.SubElement(plugin_groups, "pluginGroup")
+                plugin_group.text = openclover_plugin_group
+                tree.write(settings_path, encoding="utf-8", xml_declaration=True)
+                format_xml_with_xmllint(settings_path)
+                print(f"[INFO] Added {openclover_plugin_group} pluginGroup to {settings_path}")
+            else:
+                print(f"[INFO] {openclover_plugin_group} pluginGroup already exists in {settings_path}")
+
+        else:
+            # Create new settings.xml
+            root = ET.Element("settings")
+            root.set("xmlns", MAVEN_SETTINGS_NAMESPACE)
+            root.set("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance")
+            root.set("xsi:schemaLocation",
+                     f"{MAVEN_SETTINGS_NAMESPACE} http://maven.apache.org/xsd/settings-1.0.0.xsd")
+
+            plugin_groups = ET.SubElement(root, "pluginGroups")
+            plugin_group = ET.SubElement(plugin_groups, "pluginGroup")
+            plugin_group.text = openclover_plugin_group
+
+            tree = ET.ElementTree(root)
+            ET.register_namespace("", MAVEN_SETTINGS_NAMESPACE)
+            tree.write(settings_path, encoding="utf-8", xml_declaration=True)
+            format_xml_with_xmllint(settings_path)
+            print(f"[INFO] Created {settings_path} with {openclover_plugin_group} pluginGroup")
+
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Failed to configure Maven settings: {e}")
         return False
 
 
@@ -954,8 +1034,11 @@ def add_rts_plugins_to_pom(pom_path: str, project_name: str, tool_name: str) -> 
 
 def configure_surefire_settings(project_path: str) -> None:
     """Configure surefire settings for RTS compatibility."""
-    # Currently no modifications needed - keep existing surefire settings
-    pass
+    delete_surefire_config_element(project_path, "argLine")
+    #delete_surefire_config_element(project_path, "parallel")
+    
+    delete_surefire_config_element(project_path, "reuseForks", "true")
+    delete_surefire_config_element(project_path, "forkCount", "1")
 
 
 def cleanup_rts_artifacts(project_path: str) -> None:
@@ -1055,8 +1138,11 @@ def init_rts(
 
     # Step 2: Install RTS tool dependencies
     # OpenClover is fetched from Maven Central, no manual installation needed
+    # But we need to configure Maven settings.xml to avoid old Clover 2.4
     if tool_name == "openclover":
-        print(f"[INFO] Step 2: Skipping dependency installation for {tool_name} (fetched from Maven Central)")
+        print(f"[INFO] Step 2: Configuring Maven settings for {tool_name}...")
+        if not configure_maven_settings_for_openclover():
+            print("[WARNING] Failed to configure Maven settings for OpenClover")
     elif tool_name == "jcgeks":
         print(f"[INFO] Step 2: Installing {tool_name} dependencies...")
         if not install_jcgeks_jars():
