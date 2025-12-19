@@ -36,10 +36,16 @@ Look for `summary.txt` in the current or specified directory:
 cat summary.txt
 ```
 
+The summary.txt contains lines like:
+- `project-name: passed`
+- `project-name: failed`
+- `project-name: warning` (projects that need investigation)
+
 Report:
 - Total projects tested
-- Passed/Failed counts
+- Passed/Failed/Warning counts
 - List of failed project names
+- List of warning project names (projects with "warning" in summary.txt should also be investigated)
 
 ### Step 2: Categorize Errors
 Use these grep patterns to classify errors:
