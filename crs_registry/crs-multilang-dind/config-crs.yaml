@@ -2,11 +2,14 @@ crs-multilang-dind:
   models: []
   dependencies:
     # Uses Docker-in-Docker for complete isolation
-    # Pre-built image cache mounted at /cache/images
     - dind
+  volumes:
+    # Shared image cache - mount directory with .tar.gz image files
+    # Used by build phase to load CRS images on first build
+    # Prepare with: ./oss-crs-dind/prepare-cache.sh --tarballs
+    # Note: Docker data persists to /artifacts/docker-data/ so subsequent
+    # runs don't need to reload from cache
+    - ${HOST_CACHE_DIR}:/cache/images:ro
   modes:
     - full
     - delta
-  volumes:
-    # Pre-built image cache (set HOST_CACHE_DIR in .env to absolute host path)
-    - ${HOST_CACHE_DIR}:/cache/images:ro
