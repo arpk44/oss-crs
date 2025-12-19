@@ -24,47 +24,16 @@ services:
 {%- for crs in crs_list %}
 
 {%- if mode == 'build' %}
-  # Key Provisioner {{ loop.index }} - {{ crs.name }}
-  {{ crs.name }}_key_provisioner:
-    profiles:
-      - {{ crs.name }}_builder
-    build:
-      context: {{ key_provisioner_path }}
-      dockerfile: Dockerfile
-    environment:
-{{ litellm_url_env() }}
-{%- if external_litellm %}
-      - LITELLM_KEY=${LITELLM_KEY}
-      - EXTERNAL_LITELLM=true
-{%- else %}
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
-{%- endif %}
-{{ crs_network() }}
-    volumes:
-      - {{ volume_name('keys_data', crs.name) }}:/keys/{{ crs.name }}
-      - {{ config_dir }}:/config:ro
-    command: ["python", "key_provisioner.py", "--config-dir", "/config", "--crs", "{{ crs.name }}"]
-    healthcheck:
-      test: ["CMD", "test", "-f", "/keys/{{ crs.name }}/api_key"]
-      interval: 2s
-      timeout: 1s
-      retries: 30
-    # restart: on-failure:5
-
   # CRS Builder {{ loop.index }} - {{ crs.name }}
   {{ crs.name }}_builder:
     profiles:
       - {{ crs.name }}_builder
     image: {{ project }}_{{ crs.name }}_builder{% if source_tag %}:{{ source_tag }}{% endif %}
-{%- if crs.dind %}
+{%- if crs.dind and not crs.host_docker_builder %}
     privileged: true
 {%- endif %}
     shm_size: 2g
-    depends_on:
-      {{ crs.name }}_key_provisioner:
-        condition: service_healthy
     environment:
-{{ litellm_url_env() }}
 {%- if crs.dind %}
       - PARENT_IMAGE={{ parent_image_prefix }}/{{ project }}
 {%- endif %}
@@ -74,7 +43,15 @@ services:
       - PROJECT_NAME={{ project }}
       - FUZZING_LANGUAGE={{ project_language }}
       - HELPER=True
-{{ crs_network() }}
+{%- for var in crs_env_vars %}
+      - {{ var }}={{ '${' }}{{ var }}{{ ':-}' }}
+{%- endfor %}
+{%- if crs.host_docker_builder %}
+      - HOST_WORK_DIR={{ build_dir }}/work/{{ crs.name }}/{{ project }}
+      - HOST_OUT_DIR={{ build_dir }}/out/{{ crs.name }}/{{ project }}
+      - HOST_ARTIFACT_DIR={{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}
+      - HOST_CRS_DIR={{ crs.path }}
+{%- endif %}
     build:
       context: {{ crs.path }}
       dockerfile: builder.Dockerfile
@@ -87,23 +64,64 @@ services:
     volumes:
       - {{ build_dir }}/out/{{ crs.name }}/{{ project }}:/out
       - {{ build_dir }}/work/{{ crs.name }}/{{ project }}:/work
-      - {{ volume_name('keys_data', crs.name) }}:/keys:ro
+      - {{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}:/artifacts
 {%- if crs.dind %}
       - {{ build_dir }}/crs/parent-images/{{ project }}.tar:/project-image.tar:ro
 {%- endif %}
+{%- if crs.host_docker_builder %}
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same-path mounts for host docker socket mode - paths match on host and container
+      - {{ build_dir }}/out/{{ crs.name }}/{{ project }}:{{ build_dir }}/out/{{ crs.name }}/{{ project }}
+      - {{ build_dir }}/work/{{ crs.name }}/{{ project }}:{{ build_dir }}/work/{{ crs.name }}/{{ project }}
+      - {{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}:{{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}
+{%- endif %}
+{%- for vol in crs.volumes %}
+      - {{ vol }}
+{%- endfor %}
 {%- if source_path %}
       - {{ source_path }}:/local-source-mount
 {%- endif %}
 {%- endif %}
 
 {%- if mode == 'run' %}
+{%- if not external_litellm %}
+  # Key Provisioner {{ loop.index }} - {{ crs.name }} (internal LiteLLM only)
+  {{ crs.name }}_key_provisioner:
+    build:
+      context: {{ key_provisioner_path }}
+      dockerfile: Dockerfile
+    environment:
+{{ litellm_url_env() }}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+{{ crs_network() }}
+    volumes:
+      - {{ volume_name('keys_data', crs.name) }}:/keys/{{ crs.name }}
+      - {{ config_dir }}:/config:ro
+    command: ["python", "key_provisioner.py", "--config-dir", "/config", "--crs", "{{ crs.name }}"]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/keys/{{ crs.name }}/api_key"]
+      interval: 2s
+      timeout: 1s
+      retries: 30
+{%- endif %}
+
   # CRS Runner {{ loop.index }} - {{ crs.name }}
   {{ crs.name }}_runner:
     image: {{ crs.name }}_runner
+{%- if not crs.host_docker_builder %}
     privileged: true
+{%- endif %}
     shm_size: 2g
+{%- if not external_litellm %}
+    depends_on:
+      {{ crs.name }}_key_provisioner:
+        condition: service_healthy
+{%- endif %}
     environment:
 {{ litellm_url_env() }}
+{%- if external_litellm %}
+      - LITELLM_KEY=${LITELLM_KEY}
+{%- endif %}
       - FUZZING_ENGINE={{ engine }}
       - SANITIZER={{ sanitizer }}
       - RUN_FUZZER_MODE=interactive
@@ -112,6 +130,16 @@ services:
       - MEMORY_LIMIT={{ crs.memory_limit | string }}
       - CRS_TARGET={{ project }}
       - CRS_NAME={{ crs.name }}
+{%- for var in crs_env_vars %}
+      - {{ var }}={{ '${' }}{{ var }}{{ ':-}' }}
+{%- endfor %}
+{%- if crs.host_docker_builder %}
+      - HOST_OUT_DIR={{ build_dir }}/out/{{ crs.name }}/{{ project }}
+      - HOST_ARTIFACT_DIR={{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}
+{%- if not external_litellm %}
+      - CRS_EXTERNAL_NETWORK={{ config_hash }}_crs_network
+{%- endif %}
+{%- endif %}
 {{ crs_network() }}
     build:
       context: {{ crs.path }}
@@ -120,12 +148,30 @@ services:
         - PROJECT_PATH={{ oss_fuzz_path }}/projects/{{ project }}
     volumes:
       - {{ build_dir }}/out/{{ crs.name }}/{{ project }}:/out
+      - {{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}:/artifacts
+{%- if not external_litellm %}
       - {{ volume_name('keys_data', crs.name) }}:/keys:ro
+{%- endif %}
+{%- if crs.host_docker_builder %}
+      - /var/run/docker.sock:/var/run/docker.sock
+{%- endif %}
 {%- if harness_source %}
       - {{ harness_source }}:/harness-source:ro
 {%- endif %}
 {%- if diff_path %}
       - {{ diff_path }}:/ref.diff:ro
+{%- endif %}
+{%- for vol in crs.volumes %}
+      - {{ vol }}
+{%- endfor %}
+{%- if shared_seed_dir %}
+      # Shared seeds - own directory is rw, others are ro
+      - {{ shared_seed_dir }}/{{ crs.name }}:/seed_share_dir/{{ crs.name }}:rw
+{%- for other_crs in crs_list %}
+{%- if other_crs.name != crs.name %}
+      - {{ shared_seed_dir }}/{{ other_crs.name }}:/seed_share_dir/{{ other_crs.name }}:ro
+{%- endif %}
+{%- endfor %}
 {%- endif %}
     cpuset: {{ crs.cpuset }}
     deploy:
@@ -143,8 +189,10 @@ networks:
     name: {{ config_hash }}_crs_network
 
 {%- endif %}
+{%- if not external_litellm %}
 volumes:
 {%- for crs in crs_list %}
   {{ volume_name('keys_data', crs.name) }}:
     name: {{ volume_name('keys_data', crs.name) }}
 {%- endfor %}
+{%- endif %}
