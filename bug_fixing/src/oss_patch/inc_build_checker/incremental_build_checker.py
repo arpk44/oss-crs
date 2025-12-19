@@ -144,7 +144,7 @@ class IncrementalBuildChecker:
             stderr=subprocess.PIPE,
         )
 
-        return (proc.stdout, proc.stderr)
+        return (proc.stdout, proc.stderr, proc.returncode)
 
     def _measure_time_without_inc_build(self, source_path: Path) -> bool:
         logger.info("Measuring original build time without incremental build")
@@ -246,10 +246,10 @@ class IncrementalBuildChecker:
                 )
                 if self.project_builder.build_fuzzers(source_path, use_inc_image=True):
                     return False
-                stdout, _ = self._run_pov(harness_name, pov_path)
+                stdout, _, retcode = self._run_pov(harness_name, pov_path)
 
-                if not _detect_crash_report(
-                    stdout.decode(), self.project_builder.project_lang
+                if retcode == 0 or not _detect_crash_report(
+                    stdout.decode(errors='replace'), self.project_builder.project_lang
                 ):
                     logger.error(f'crash is not detected for "{pov_name}"')
                     print(stdout.decode())
@@ -275,9 +275,9 @@ class IncrementalBuildChecker:
                     f'Build time with incremental build and patch ("{patch_path.name}"): {build_time_with_patch}'
                 )
 
-                stdout, _ = self._run_pov(harness_name, pov_path)
+                stdout, _, retcode = self._run_pov(harness_name, pov_path)
 
-                if _detect_crash_report(str(stdout), self.project_builder.project_lang):
+                if retcode != 0 and _detect_crash_report(stdout.decode(errors='replace'), self.project_builder.project_lang):
                     logger.error(
                         f'crash is detected for "{pov_name}" with a patch "{patch_path}"'
                     )
