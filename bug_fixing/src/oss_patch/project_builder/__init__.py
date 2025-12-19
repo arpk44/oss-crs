@@ -456,7 +456,7 @@ class OSSPatchProjectBuilder:
         # Build container command
         base_cmd = (
             f"export PATH=/ccache/bin:\\$PATH && "
-            f"rm -rf {old_workdir} && cp -r /local-source-mount {old_workdir} && "
+            f"pushd \\$SRC && rm -rf {old_workdir} && cp -r /local-source-mount {old_workdir} && popd && "
             f"rsync -av \\$SRC/ {new_src_dir} && "
             f"export SRC={new_src_dir} && "
             f"cd {new_workdir} && "
@@ -614,7 +614,6 @@ class OSSPatchProjectBuilder:
         project_path = self.oss_fuzz_path / "projects" / self.project_name
         sanitizer = "address"
 
-        old_workdir = _workdir_from_dockerfile(project_path, self.project_name)
         builder_image_name = get_builder_image_name(
             self.oss_fuzz_path, self.project_name
         )
@@ -634,7 +633,7 @@ class OSSPatchProjectBuilder:
 
         # Build the container command
         base_cmd = (
-            f"rm -rf {old_workdir} && cp -r /local-source-mount {old_workdir} && "
+            f"pushd \\$SRC && rm -rf {old_workdir} && cp -r /local-source-mount {old_workdir} && popd && "
             f"rsync -av \\$SRC/ {new_src_dir} && "
             f"export SRC={new_src_dir} && "
             f"cd {new_workdir} && "
