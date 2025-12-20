@@ -60,3 +60,9 @@ packages = [
 dev = [
     "ty>=0.0.4",
 ]
+
+[tool.ty.src]
+include = [
+    "bug_finding",
+    "bug_fixing",
+]
