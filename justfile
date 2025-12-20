@@ -1,5 +1,3 @@
-# justfile for oss-crs
-
-# Run type checking with pyright
+# Run type checking with ty
 typecheck:
     uv run --all-extras ty check
