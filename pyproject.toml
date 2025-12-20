@@ -55,3 +55,8 @@ packages = [
     "base_images/oss_patch_runner/*",
 ]
 "crs_registry" = ["*/*.yaml"]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.4",
+]
