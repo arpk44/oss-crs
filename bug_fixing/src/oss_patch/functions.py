@@ -66,7 +66,9 @@ def load_image_to_volume(volume_name: str) -> bool:
 
 
 def change_ownership_with_docker(target_path: Path) -> bool:
-    command = f"docker run --rm --privileged -v {target_path}:/target {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} chown -R {os.getuid()} /target"
+    uid = os.getuid()
+    gid = os.getgid()
+    command = f"docker run --rm --privileged -v {target_path}:/target {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} chown -R {uid}:{gid} /target"
 
     proc = subprocess.run(
         command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True
