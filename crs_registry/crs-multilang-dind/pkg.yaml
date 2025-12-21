@@ -3,4 +3,3 @@ type: bug-finding
 source:
   url: https://github.com/Team-Atlanta/atlantis-multilang-snapshot
   ref: dind
-#  local_path: /home/dongkwan/crs-multilang-public
