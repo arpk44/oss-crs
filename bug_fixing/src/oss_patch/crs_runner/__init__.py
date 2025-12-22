@@ -244,7 +244,7 @@ class OSSPatchCRSRunner:
             f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS}:/crs-docker",
             f"-v {OSS_PATCH_CRS_SYSTEM_IMAGES}:{DEFAULT_DOCKER_ROOT_DIR}",
             f"-v {self.work_dir.resolve()}:/work",
-            f"-v {self.out_dir.resolve()}:/out",
+            f"-v {self.out_dir.resolve()}:/artifacts",
         ]
 
         # # Mount harness source to predetermined path if provided
