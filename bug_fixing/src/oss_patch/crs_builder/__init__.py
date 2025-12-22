@@ -46,6 +46,14 @@ class OSSPatchCRSBuilder:
         self.use_gitcache = use_gitcache
 
     def build(self, volume_name: str = OSS_PATCH_CRS_SYSTEM_IMAGES) -> bool:
+        # Check if CRS image already exists before doing any work
+        crs_image_name = get_crs_image_name(self.crs_name)
+        if docker_image_exists_in_volume(crs_image_name, volume_name):
+            logger.info(
+                f'CRS image "{crs_image_name}" already exists in "{volume_name}". Skipping build for {self.crs_name}.'
+            )
+            return True
+
         logger.info(f'Getting CRS metadata for "{self.crs_name}"...')
         result = self._get_crs_yamls()
         if not result:
@@ -142,12 +150,6 @@ class OSSPatchCRSBuilder:
         assert Path(self.crs_path / rel_dockerfile_path).exists()
 
         crs_image_name = get_crs_image_name(self.crs_name)
-
-        if docker_image_exists_in_volume(crs_image_name, volume_name):
-            logger.info(
-                f'CRS image "{crs_image_name}" already exist in the "{volume_name}". Skip buliding the CRS {self.crs_name}.'
-            )
-            return True
 
         logger.info("Building CRS Docker image...")
 
