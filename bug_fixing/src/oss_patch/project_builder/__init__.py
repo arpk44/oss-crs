@@ -325,19 +325,13 @@ class OSSPatchProjectBuilder:
 
         return True
 
-    def _detect_incremental_build(self, volume_name: str) -> bool:
+    def _detect_incremental_build(self, image_name: str) -> bool:
         # Check if the project_builder image contains `/usr/local/bin/replay_build.sh`
-        if not docker_image_exists_in_volume(
-            get_builder_image_name(self.oss_fuzz_path, self.project_name), volume_name
-        ):
+        if not docker_image_exists(image_name):
+            logger.error(f'The image "{image_name}" does not exist in docker daemon')
             return False
 
-        command = (
-            f"docker run --rm --privileged "
-            f"-v {volume_name}:{DEFAULT_DOCKER_ROOT_DIR} "
-            f"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} "
-            f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} stat /usr/local/bin/replay_build.sh"
-        )
+        command = f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} stat /usr/local/bin/replay_build.sh"
 
         # subprocess.check_call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
 
@@ -362,6 +356,12 @@ class OSSPatchProjectBuilder:
         builder_image_name = get_builder_image_name(
             self.oss_fuzz_path, self.project_name
         )
+
+        if self._detect_incremental_build(builder_image_name):
+            logger.info(
+                f'Builder image "{builder_image_name}" is already a snapshot image for incremental build'
+            )
+            return True
 
         new_src_dir = "/built-src"
         new_workdir = _workdir_from_dockerfile(project_path, self.project_name).replace(
@@ -584,6 +584,7 @@ class OSSPatchProjectBuilder:
 
     def take_incremental_build_snapshot(self, source_path: Path) -> bool:
         logger.info("Taking a snapshot for incremental build...")
+
         assert self.oss_fuzz_path.exists()
         assert self.project_path
 

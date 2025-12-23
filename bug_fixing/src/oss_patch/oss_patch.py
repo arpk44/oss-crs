@@ -118,7 +118,7 @@ class OSSPatch:
             pull_project_source(project_path, source_path, use_gitcache)
 
         assert source_path.exists()
-        assert is_git_repository(source_path) # FIXME: should support non-git source
+        assert is_git_repository(source_path)  # FIXME: should support non-git source
 
         project_builder = OSSPatchProjectBuilder(
             self.work_dir,
@@ -157,7 +157,7 @@ class OSSPatch:
             litellm_api_key,
             litellm_api_base,
             hints_dir,
-            "full", # TODO: support delta mode
+            "full",  # TODO: support delta mode
         )
 
     # # Testing purpose function

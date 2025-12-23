@@ -16,6 +16,7 @@ import shutil
 import logging
 import re
 import yaml
+import git
 
 logger = logging.getLogger()
 
@@ -450,3 +451,8 @@ def extract_java_exception_report(full_log: str) -> str | None:
         return None
 
     return full_log[match.start() :]
+
+
+def get_git_commit_hash(repository_path: Path) -> str:
+    repo = git.Repo(repository_path)
+    return repo.head.object.hexsha

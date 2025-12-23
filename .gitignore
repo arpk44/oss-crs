@@ -4,3 +4,4 @@
 build
 oss-fuzz
 .work
+.oss-patch-work

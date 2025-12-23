@@ -5,7 +5,7 @@ import tempfile
 
 
 from bug_fixing.src.oss_patch.functions import (
-    docker_image_exists_in_volume,
+    docker_image_exists,
     get_crs_image_name,
     run_command,
 )
@@ -47,13 +47,13 @@ class OSSPatchCRSBuilder:
         self.use_gitcache = use_gitcache
         self.force_rebuild = force_rebuild
 
-    def build(self, volume_name: str = OSS_PATCH_CRS_SYSTEM_IMAGES) -> bool:
+    def build(self) -> bool:
         # Check if CRS image already exists before doing any work
         if not self.force_rebuild:
             crs_image_name = get_crs_image_name(self.crs_name)
-            if docker_image_exists_in_volume(crs_image_name, volume_name):
+            if docker_image_exists(crs_image_name):
                 logger.info(
-                    f'CRS image "{crs_image_name}" already exists in "{volume_name}". Skipping build for {self.crs_name}.'
+                    f'CRS image "{crs_image_name}" already exists. Skipping build for {self.crs_name}.'
                 )
                 return True
 
@@ -69,7 +69,7 @@ class OSSPatchCRSBuilder:
 
         if self.crs_path:
             # Use the existing local CRS source
-            return self._build_crs_image_in_volume(config_crs_yaml_path, volume_name)
+            return self._build_crs_image(config_crs_yaml_path)
 
         # Pull CRS metadata and source
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -77,7 +77,7 @@ class OSSPatchCRSBuilder:
 
             if not self._prepare_crs_source(pkg_yaml_path, tmp_path):
                 return False
-            return self._build_crs_image_in_volume(config_crs_yaml_path, volume_name)
+            return self._build_crs_image(config_crs_yaml_path)
 
     def _prepare_crs_source(self, pkg_yaml_path: Path, tmp_path: Path) -> bool:
         # Determine CRS source path
@@ -138,7 +138,7 @@ class OSSPatchCRSBuilder:
 
         return True
 
-    def _build_crs_image_in_volume(self, config_yaml: Path, volume_name: str) -> bool:
+    def _build_crs_image(self, config_yaml: Path) -> bool:
         assert config_yaml.exists()
         assert self.crs_path and self.crs_path.exists()
 
@@ -156,17 +156,22 @@ class OSSPatchCRSBuilder:
 
         logger.info("Building CRS Docker image...")
 
-        crs_repo_path_in_container = "/crs-source"
+        # crs_repo_path_in_container = "/crs-source"
 
-        crs_build_command = f"docker build --network=host --tag {crs_image_name} --file {str(Path(crs_repo_path_in_container, rel_dockerfile_path))} {crs_repo_path_in_container}"
-
-        docker_command = (
-            f"docker run --rm --privileged --network=host "
-            f"-v {volume_name}:{DEFAULT_DOCKER_ROOT_DIR} "
-            f"-v {self.crs_path}:{crs_repo_path_in_container} "
-            f"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} "
-            f"{crs_build_command}"
+        crs_build_command = (
+            f"docker build --network=host "
+            f"--tag {crs_image_name} "
+            f"--file {str(Path(self.crs_path, rel_dockerfile_path))} "
+            f"{self.crs_path}"
         )
+
+        # docker_command = (
+        #     f"docker run --rm --privileged --network=host "
+        #     f"-v {volume_name}:{DEFAULT_DOCKER_ROOT_DIR} "
+        #     f"-v {self.crs_path}:{crs_repo_path_in_container} "
+        #     f"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} "
+        #     f"{crs_build_command}"
+        # )
 
         # try:
         #     subprocess.check_call(
@@ -181,11 +186,11 @@ class OSSPatchCRSBuilder:
         #     )
         #     return False
 
-        run_command(docker_command)
+        run_command(crs_build_command)
 
-        logger.info("=" * 60)
+        # logger.info("=" * 60)
         logger.info("CRS build completed successfully!")
         logger.info(f"CRS image: {get_crs_image_name(self.crs_name)}")
-        logger.info("=" * 60)
+        # logger.info("=" * 60)
 
         return True
