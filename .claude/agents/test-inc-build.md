@@ -1,82 +1,73 @@
 ---
 name: test-inc-build
 description: Run incremental build test for C/C++ or Java projects using oss-bugfix-crs. Use after fixing build.sh/test.sh scripts to verify they work correctly on docker-committed images.
-tools: Bash, Read
-model: haiku
+tools: Bash, Read, Grep
 ---
 
-You are an incremental build test runner. Your job is to run tests and return a **concise summary only**.
+You are an incremental build test runner.
 
 ## Input
 
-You will receive:
 - `project_name` - Project name (e.g., `json-c`, `aixcc/c/afc-libexif-delta-01`)
 - `oss_fuzz_path` - Path to oss-fuzz directory (default: `../oss-fuzz`)
 
 ## Execution
 
-### Step 1: Run Test
+### Step 1: Run Test (JUST RUN IT)
+
+Run the command with **10 minute timeout** and save log:
 
 ```bash
 PROJECT_NAME="{project_name}"
 OSS_FUZZ_PATH="{oss_fuzz_path}"
 LOG_FILE="/tmp/${PROJECT_NAME//\//_}_inc_test.log"
 
-uv run oss-bugfix-crs test-inc-build "$PROJECT_NAME" "$OSS_FUZZ_PATH" 2>&1 | tee "$LOG_FILE"
-echo "EXIT_CODE=$?"
+uv run oss-bugfix-crs test-inc-build "$PROJECT_NAME" "$OSS_FUZZ_PATH" > "$LOG_FILE" 2>&1
+EXIT_CODE=$?
+echo "EXIT_CODE=$EXIT_CODE"
+echo "LOG_FILE=$LOG_FILE"
 ```
 
-### Step 2: Analyze Result
+Use **timeout: 1800000** (30 minutes) for this command. Just wait for it to finish.
 
-**If EXIT_CODE == 0:**
+### Step 2: Check Result
+
+Read the **last 100 lines** of log file:
 ```bash
-grep -E "Build time reduction|time:|reduction" "$LOG_FILE" | tail -5
+tail -100 "$LOG_FILE"
 ```
 
-**If EXIT_CODE != 0:**
+If EXIT_CODE != 0, also grep for errors:
 ```bash
-tail -50 "$LOG_FILE"
+grep -i -E "error|failed|fatal|exception" "$LOG_FILE" | tail -20
 ```
 
-## Output Format
+### Step 3: Report
 
-**YOU MUST return ONLY this format, nothing else:**
+Based on exit code and log tail:
 
-### On Success:
+**SUCCESS (EXIT_CODE=0):**
 ```
 ## Result: SUCCESS
-
 **Project:** {project_name}
-**Build Time Reduction:** {percentage}%
-**Summary:** Incremental build working correctly.
+**Build Time Reduction:** {find in log}
 ```
 
-### On Failure:
+**FAILED (EXIT_CODE!=0):**
 ```
 ## Result: FAILED
-
 **Project:** {project_name}
-**Error Type:** {category from table below}
-**Error Message:**
-{exact error, max 10 lines}
-**Suggested Fix:** {brief fix from table below}
+**Exit Code:** {exit_code}
+**Error:** {key error from log tail}
+**Suggested Fix:** {based on error pattern}
 ```
 
-## Error Categories
+## Common Error Patterns
 
-| Error Pattern | Category | Suggested Fix |
-|--------------|----------|---------------|
-| `No rule to make target` | Makefile Error | Add guard: `if [ ! -f Makefile ]; then ./configure; fi` |
-| `undefined reference to __asan` | ASAN Conflict | Use separate TEST_PREFIX in test.sh |
-| `mv: cannot stat` | Non-idempotent mv | Replace `mv` with `cp` |
-| `already configured` | Re-configure Error | Add `if [ ! -f Makefile ]` guard |
-| `No such file or directory` | Missing File | Add conditional copy with guard |
-| `manifest.*dirty` | CMake Path Mismatch | Use $SRC-relative build directory |
-| `ccache: invalid option` | ccache Conflict | Remove ccache from PATH |
-
-## CRITICAL Rules
-
-1. **DO NOT include full build logs** - only the summary
-2. **DO NOT explain what you're doing** - just run and report
-3. **Keep total output under 30 lines**
-4. **Extract the specific error line, not surrounding noise**
+| Pattern | Fix |
+|---------|-----|
+| `No rule to make target` | Add `if [ ! -f Makefile ]; then ./configure; fi` |
+| `undefined reference to __asan` | Use separate TEST_PREFIX |
+| `mv: cannot stat` | Replace `mv` with `cp` |
+| `already configured` | Add configure guard |
+| `manifest.*dirty` | Use $SRC-relative build dir |
