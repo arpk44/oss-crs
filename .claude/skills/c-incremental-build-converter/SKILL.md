@@ -8,6 +8,38 @@ allowed-tools: Read, Grep, Glob, Bash, Edit, Write
 
 This skill converts C/C++ project build.sh and test.sh scripts to support incremental builds after docker commit.
 
+## CRITICAL CONSTRAINTS
+
+### 1. DO NOT Modify oss-fuzz Infrastructure Code
+
+**NEVER modify these files:**
+- `oss-fuzz/infra/helper.py`
+- `oss-fuzz/infra/base-images/*`
+- Any other oss-fuzz infrastructure code
+
+**ONLY modify:**
+- `oss-fuzz/projects/{project}/build.sh`
+- `oss-fuzz/projects/{project}/test.sh`
+- `oss-fuzz/projects/{project}/Dockerfile` (if absolutely necessary)
+
+### 2. If oss-crs Test Framework Has Issues
+
+If the incremental build test framework (`incremental_build_checker.py`) has bugs or limitations:
+1. **Report the issue to the user** with clear explanation
+2. **Suggest a fix** for the framework code
+3. **DO NOT implement the fix yourself** - let the user decide
+
+Example report format:
+```
+## oss-crs Framework Issue Detected
+
+**File:** bug_fixing/src/oss_patch/inc_build_checker/incremental_build_checker.py
+**Issue:** The source copy command destroys build artifacts
+**Current behavior:** `rm -rf $SRC/nginx && cp -r ...`
+**Expected behavior:** Should preserve objs/ directory
+**Suggested fix:** Use rsync with --exclude objs instead of rm+cp
+```
+
 ## Key Architecture: Separate $SRC for build.sh and test.sh
 
 **IMPORTANT: $SRC is different between build.sh and test.sh.**
