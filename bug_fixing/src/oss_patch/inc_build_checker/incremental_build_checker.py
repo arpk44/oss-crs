@@ -63,7 +63,6 @@ class IncrementalBuildChecker:
         logger.info(f"  project_name: {self.project_name}")
         logger.info(f"  oss_fuzz_path.exists(): {self.oss_fuzz_path.exists()}")
         logger.info(f"  oss_fuzz_path: {self.oss_fuzz_path}")
-logger.info(f"DEBUG IncrementalBuildChecker.__init__:")
 
         self.build_time_without_inc_build: float | None = None
         self.build_time_with_inc_build: dict[str, float] = {}  # {sanitizer: build_time}
