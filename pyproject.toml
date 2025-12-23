@@ -19,6 +19,8 @@ dependencies = [
     "docker>=7.1.0",
     "ruff>=0.14.5",
     "pyright>=1.1.407",
+    "pygit>=0.1",
+    "gitpython>=3.1.45",
 ]
 
 [project.scripts]
@@ -32,7 +34,16 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["bug_finding", "bug_finding.src", "bug_fixing", "bug_fixing.src", "crs_registry"]
+packages = [
+    "bug_finding", "bug_finding.src",
+    "bug_fixing", "bug_fixing.src",
+    "bug_fixing.src.oss_patch",
+    "bug_fixing.src.oss_patch.crs_builder",
+    "bug_fixing.src.oss_patch.crs_runner",
+    "bug_fixing.src.oss_patch.project_builder",
+    "bug_fixing.src.oss_patch.inc_build_checker",
+    "crs_registry"
+]
 
 [tool.setuptools.package-data]
 "bug_finding" = [
@@ -41,4 +52,19 @@ packages = ["bug_finding", "bug_finding.src", "bug_fixing", "bug_fixing.src", "c
     "key_provisioner/Dockerfile",
     "key_provisioner/*.toml",
 ]
+"bug_fixing" = [
+    "base_images/docker_cache_builder/*",
+    "base_images/oss_patch_runner/*",
+]
 "crs_registry" = ["*/*.yaml"]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.4",
+]
+
+[tool.ty.src]
+include = [
+    "bug_finding",
+    "bug_fixing",
+]

@@ -9,9 +9,13 @@ from bug_fixing.src.oss_patch.functions import (
     run_command,
     create_docker_volume,
     docker_image_exists,
+    docker_image_exists_in_volume,
     load_images_to_volume,
     get_builder_image_name,
     get_base_runner_image_name,
+    get_git_commit_hash,
+    get_crs_image_name,
+    change_ownership_with_docker,
 )
 from bug_fixing.src.oss_patch.globals import (
     OSS_PATCH_CRS_SYSTEM_IMAGES,
@@ -19,10 +23,10 @@ from bug_fixing.src.oss_patch.globals import (
     DEFAULT_DOCKER_ROOT_DIR,
     OSS_PATCH_BUILD_CONTEXT_DIR,
     OSS_PATCH_RUNNER_DATA_PATH,
+    OSS_PATCH_DIR,
 )
-
 from bug_fixing.src.oss_patch.models import CRSMode
-from contextlib import contextmanager
+from tempfile import TemporaryDirectory
 
 logger = logging.getLogger()
 
@@ -47,63 +51,98 @@ def _cleanup_dir(target_dir: Path):
             item.unlink()
 
 
-@contextmanager
-def temp_build_context(path_name="temp_data"):
-    temp_path = Path(path_name).resolve()
+def _disable_force_build_in_oss_fuzz(oss_fuzz_path: Path):
+    helper_path = oss_fuzz_path / "infra/helper.py"
 
-    try:
-        temp_path.mkdir(exist_ok=True)
-    except OSError as e:
-        raise e
+    helper_script = helper_path.read_text()
 
-    try:
-        yield temp_path
-    finally:
-        if temp_path.exists():
-            try:
-                shutil.rmtree(temp_path)
-            except OSError:
-                pass
+    helper_path.write_text(
+        helper_script.replace("build_project_image=True", "build_project_image=False")
+    )
+
+
+def _check_force_build_in_oss_fuzz(oss_fuzz_path: Path) -> bool:
+    helper_path = oss_fuzz_path / "infra/helper.py"
+
+    if "build_project_image=True" in helper_path.read_text():
+        return False
+
+    return True
 
 
 class OSSPatchCRSRunner:
     def __init__(self, project_name: str, work_dir: Path, out_dir: Path | None = None):
         self.project_name = project_name
         self.work_dir = work_dir
+        self.run_context_dir = self.work_dir / "run_context"
+        self.oss_fuzz_path = self.run_context_dir / "oss-fuzz"
+        self.proj_src_path = self.run_context_dir / "proj-src"
+
         self.out_dir = out_dir
 
         if out_dir and not out_dir.exists():
             out_dir.mkdir()
 
+    def _write_runner_metadata(self):
+        oss_fuzz_path = self.run_context_dir / "oss-fuzz"
+        proj_src_path = self.run_context_dir / "proj-src"
+
+        config_yaml = {
+            "project_name": self.project_name,
+            "oss-fuzz": get_git_commit_hash(oss_fuzz_path),
+            "proj-src": get_git_commit_hash(proj_src_path),
+        }
+
+        with open(self.run_context_dir / "config.yaml", "w") as f:
+            f.write(yaml.safe_dump(config_yaml, sort_keys=False))
+
+    def _construct_run_context(self, oss_fuzz_path: Path, source_path: Path) -> bool:
+        if self.run_context_dir.exists():
+            change_ownership_with_docker(self.run_context_dir)
+            shutil.rmtree(self.run_context_dir)
+        self.run_context_dir.mkdir()
+
+        if not self._copy_oss_fuzz_and_sources(
+            oss_fuzz_path, source_path, self.run_context_dir
+        ):
+            return False
+
+        _disable_force_build_in_oss_fuzz(self.oss_fuzz_path)
+
+        self._write_runner_metadata()
+
+        return True
+
     def build(
         self,
         oss_fuzz_path: Path,
         source_path: Path,
-        context_dir: Path = OSS_PATCH_BUILD_CONTEXT_DIR,
     ) -> bool:
-        with temp_build_context(str(context_dir)):
-            if not self._prepare_docker_volumes():
-                return False
+        if not self._prepare_docker_volumes():
+            return False
 
-            if not self._copy_oss_fuzz_and_sources(
-                oss_fuzz_path, source_path, context_dir
-            ):
-                return False
+        if not self._construct_run_context(oss_fuzz_path, source_path):
+            return False
 
-            if not self._prepare_runner_image(context_dir):
-                return False
-
-            if not load_images_to_volume(
-                [
-                    get_builder_image_name(oss_fuzz_path, self.project_name),
-                    get_base_runner_image_name(oss_fuzz_path),
-                ],
-                OSS_PATCH_DOCKER_IMAGES_FOR_CRS,
-            ):
-                logger.error(
-                    f'Image loading to "{OSS_PATCH_DOCKER_IMAGES_FOR_CRS}" has failed'
+        images_to_load = [
+            get_builder_image_name(oss_fuzz_path, self.project_name),
+            get_base_runner_image_name(oss_fuzz_path),
+        ]
+        # TODO: optimize speed; caching
+        if not load_images_to_volume(
+            [
+                image_name
+                for image_name in images_to_load
+                if not docker_image_exists_in_volume(
+                    image_name, OSS_PATCH_DOCKER_IMAGES_FOR_CRS
                 )
-                return False
+            ],
+            OSS_PATCH_DOCKER_IMAGES_FOR_CRS,
+        ):
+            logger.error(
+                f'Image loading to "{OSS_PATCH_DOCKER_IMAGES_FOR_CRS}" has failed'
+            )
+            return False
 
         return True
 
@@ -127,11 +166,11 @@ class OSSPatchCRSRunner:
         dst_dir.mkdir()
 
         # prepare cp sources
-        cp_source_path = (dst_dir / "cp-sources").resolve()
+        proj_src_path = (dst_dir / "proj-src").resolve()
         copied_oss_fuzz_path = (dst_dir / "oss-fuzz").resolve()
 
         # copy existing CP's source
-        shutil.copytree(source_path, cp_source_path)
+        shutil.copytree(source_path, proj_src_path)
 
         # copy the provided OSS-Fuzz source
         shutil.copytree(oss_fuzz_path, copied_oss_fuzz_path)
@@ -189,12 +228,22 @@ class OSSPatchCRSRunner:
             f'Building runner image "{get_runner_image_name(self.project_name)}"...'
         )
 
+        # FIXME: should not copy; when we have a dedicated oss_path_runner_base
+        # Copy OSS_PATCH_DIR to OSS_PATCH_BUILD_CONTEXT_DIR / {basename}
+        build_context = OSS_PATCH_BUILD_CONTEXT_DIR
+        build_context.mkdir(parents=True, exist_ok=True)
+
+        dst_patch_dir = build_context / OSS_PATCH_DIR.name  # Uses basename
+        if dst_patch_dir.exists():
+            shutil.rmtree(dst_patch_dir)
+        shutil.copytree(OSS_PATCH_DIR, dst_patch_dir)
+
         try:
             command = (
                 f"docker build --tag {get_runner_image_name(self.project_name)} "
                 f"--build-arg target_project={self.project_name} "
                 f"--file {OSS_PATCH_RUNNER_DATA_PATH / 'Dockerfile'} "
-                f"{str(Path.cwd())}"
+                f"{str(build_context)}"
             )
             run_command(command)
             return True
@@ -223,40 +272,64 @@ class OSSPatchCRSRunner:
     def _run_crs_against_povs(
         self, crs_name: str, litellm_api_key: str, litellm_api_base: str
     ) -> bool:
-        cmd_parts = [
-            "docker",
-            "run --rm --privileged",
-            "--net=host",  # @NOTE: LiteLLM does not work properly without this option.
-            f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS}:/crs-docker",
-            f"-v {OSS_PATCH_CRS_SYSTEM_IMAGES}:{DEFAULT_DOCKER_ROOT_DIR}",
-            f"-v {self.work_dir}:/work",
-            f"-v {self.out_dir}:/out",
-        ]
+        # Run the CRS container
 
-        # # Mount harness source to predetermined path if provided
-        # if harness_source:
-        #     cmd_parts.extend(["-v", f"{harness_source}:/harness-source:ro"])
+        assert self.out_dir
 
-        cmd_parts.extend(
-            [
-                f"-e LITELLM_API_KEY={litellm_api_key}",
-                f"-e LITELLM_API_BASE={litellm_api_base}",
-                f"-e CRS_NAME={crs_name}",
-                get_runner_image_name(self.project_name),
-                "launch_crs.sh",
-            ]
-        )
-
-        command = " ".join(cmd_parts)
-
-        try:
-            # @TODO: ensure the clean-up of existing docker processes
-            # subprocess.check_call(command, shell=True)
-            run_command(command, n=10)
-            return True
-        except subprocess.CalledProcessError as e:
-            logger.error(f"CRS failed: {e}")
+        if not _check_force_build_in_oss_fuzz(self.oss_fuzz_path):
+            logger.error(
+                f"OSS-Fuzz's forciful image build is enabled, which prevents our CRS using incremental build"
+            )
             return False
+
+        if not self.oss_fuzz_path.exists():
+            logger.error(
+                f"OSS-Fuzz does not exist in run_context ({self.run_context_dir}). Run `build` command first."
+            )
+            return False
+        if not self.proj_src_path.exists():
+            logger.error(
+                f"Target project's source does not exist in run_context ({self.run_context_dir}). Run `build` command first."
+            )
+            return False
+
+        with TemporaryDirectory() as tmp_dir:
+            crs_run_tmp_dir = Path(tmp_dir)
+            try:
+                self._copy_oss_fuzz_and_sources(
+                    self.oss_fuzz_path, self.proj_src_path, crs_run_tmp_dir
+                )
+
+                tmp_oss_fuzz_path = crs_run_tmp_dir / "oss-fuzz"
+                tmp_proj_src_path = crs_run_tmp_dir / "proj-src"
+
+                command = (
+                    f"docker run --rm --privileged --network=host "
+                    f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS}:/var/lib/docker "
+                    f"-v {tmp_oss_fuzz_path}:/oss-fuzz "
+                    f"-v {tmp_proj_src_path}:/cp-sources "
+                    f"-v {self.work_dir.resolve()}:/work "
+                    f"-v {self.out_dir.resolve()}:/artifacts "
+                    f"-e LITELLM_API_BASE={litellm_api_base} "
+                    f"-e LITELLM_API_KEY={litellm_api_key} "
+                    f"-e TARGET_PROJ={self.project_name} "
+                    f"-e OSS_FUZZ=/oss-fuzz "
+                    f"-e CP_SOURCES=/cp-sources "
+                    f"{get_crs_image_name(crs_name)}"
+                )
+
+                try:
+                    # @TODO: ensure the clean-up of existing docker processes
+                    # subprocess.check_call(command, shell=True)
+                    run_command(command, n=10)
+                    return True
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"CRS failed: {e}")
+                    return False
+
+            finally:
+                change_ownership_with_docker(crs_run_tmp_dir)
+                change_ownership_with_docker(self.out_dir)
 
     def _prepare_hints(self, hints_path: Path):
         shutil.copytree(hints_path, self.work_dir / "hints")
@@ -274,8 +347,9 @@ class OSSPatchCRSRunner:
         if not _check_povs(povs_path):
             return False
 
-        _cleanup_dir(self.work_dir)
-        (self.work_dir / "povs").mkdir(exist_ok=True)
+        povs_dir = self.work_dir / "povs"
+        _cleanup_dir(povs_dir)
+        povs_dir.mkdir(exist_ok=True)
 
         self._prepare_povs_yaml(harness_name, povs_path, mode)
 
@@ -310,10 +384,10 @@ class OSSPatchCRSRunner:
         reproduce_command = f"python3 {oss_fuzz_path / 'infra/helper.py'} reproduce {self.project_name} {harness_name} /testcase"
 
         # runner_command = (
-        #     f"docker run --rm --privileged --net=host "
+        #     f"docker run --rm --privileged --network=host "
         #     f"-v {OSS_PATCH_CRS_DOCKER_ASSETS}:{DEFAULT_DOCKER_ROOT_DIR} "
-        #     f"-v {source_path}:/cp-sources "
-        #     f"-v {pov_path}:/testcase "
+        #     f"-v {source_path.resolve()}:/cp-sources "
+        #     f"-v {pov_path.resolve()}:/testcase "
         #     f"{get_runner_image_name(self.project_name)} "
         #     f'sh -c "{build_fuzzers_command} && {reproduce_command}"'
         # )

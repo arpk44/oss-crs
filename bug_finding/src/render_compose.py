@@ -19,13 +19,62 @@ from pathlib import Path
 from importlib.resources import files
 from typing import Dict, Any, List, Optional, Tuple
 
+from dotenv import dotenv_values
 from jinja2 import Template
+
+from .utils import run_git
 
 TEMPLATE_DIR = files(__package__).parent / "templates"
 KEY_PROVISIONER_DIR = files(__package__).parent / "key_provisioner"
 
 # Configure logging (INFO level won't show by default)
 logging.basicConfig(level=logging.WARNING, format='%(message)s')
+
+
+def check_image_exists(image_name: str, check_any_tag: bool = False) -> bool:
+    """Check if Docker image exists locally.
+
+    Args:
+        image_name: Full Docker image name (e.g., 'json-c_crs-multilang_builder:abc123')
+        check_any_tag: If True and image_name has no tag, check if any image with that name exists
+
+    Returns:
+        True if image exists locally, False otherwise
+    """
+    # First try exact match
+    result = subprocess.run(
+        ['docker', 'image', 'inspect', image_name],
+        capture_output=True
+    )
+    if result.returncode == 0:
+        return True
+
+    # If check_any_tag is True and no tag specified, check for any tag
+    if check_any_tag and ':' not in image_name:
+        result = subprocess.run(
+            ['docker', 'images', '-q', image_name],
+            capture_output=True,
+            text=True
+        )
+        return bool(result.stdout.strip())
+
+    return False
+
+
+def get_crs_env_vars(config_dir: Path) -> List[str]:
+    """Extract CRS_* prefixed variable names from .env file.
+
+    Args:
+        config_dir: Directory containing the .env file
+
+    Returns:
+        Sorted list of environment variable names starting with 'CRS_'
+    """
+    env_file = config_dir / ".env"
+    if not env_file.exists():
+        return []
+    env_vars = dotenv_values(str(env_file))
+    return sorted([k for k in env_vars.keys() if k.startswith('CRS_')])
 
 
 @dataclass
@@ -211,12 +260,12 @@ def clone_crs_if_needed(crs_name: str, crs_build_dir: Path, registry_dir: Path) 
         # Clone the CRS repository from URL
         logging.info(f"Cloning CRS '{crs_name}' from {crs_url}")
         try:
-            subprocess.check_call(['git', 'clone', crs_url, str(crs_path)], stdout=subprocess.DEVNULL)
+            run_git(['clone', crs_url, str(crs_path)], stdout=subprocess.DEVNULL)
 
             if crs_ref:
-                subprocess.check_call(['git', '-C', str(crs_path), 'checkout', crs_ref], stdout=subprocess.DEVNULL)
-                subprocess.check_call(['git', '-C', str(crs_path), 'submodule', 'update',
-                                       '--init', '--recursive', '--depth', '1'], stdout=subprocess.DEVNULL)
+                run_git(['-C', str(crs_path), 'checkout', crs_ref], stdout=subprocess.DEVNULL)
+                run_git(['-C', str(crs_path), 'submodule', 'update',
+                         '--init', '--recursive', '--depth', '1'], stdout=subprocess.DEVNULL)
 
             logging.info(f"Successfully cloned CRS '{crs_name}' to {crs_path}")
             return crs_path
@@ -327,9 +376,13 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
         used_cpus.update(crs_cpus_set)
         used_memory_mb += crs_memory_mb
 
-        # Get dind flag from CRS config-crs.yaml dependencies
+        # Get dind and host_docker_builder flags from CRS config-crs.yaml dependencies
         crs_dependencies = crs_pkg_data.get(crs_name, {}).get('dependencies', [])
         crs_dind = 'dind' in crs_dependencies if crs_dependencies else False
+        crs_host_docker_builder = 'host_docker_builder' in crs_dependencies if crs_dependencies else False
+
+        # Get volumes from CRS config-crs.yaml
+        crs_volumes = crs_pkg_data.get(crs_name, {}).get('volumes', [])
 
         result.append({
             'name': crs_name,
@@ -337,7 +390,9 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
             'cpuset': format_cpu_list(crs_cpus_list),
             'memory_limit': format_memory(crs_memory_mb),
             'suffix': 'runner',
-            'dind': crs_dind
+            'dind': crs_dind,
+            'host_docker_builder': crs_host_docker_builder,
+            'volumes': crs_volumes
         })
 
     # Process auto-divide CRS instances
@@ -383,9 +438,13 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
             else:
                 crs_memory = memory_per_crs
 
-            # Get dind flag from CRS config-crs.yaml dependencies
+            # Get dind and host_docker_builder flags from CRS config-crs.yaml dependencies
             crs_dependencies = crs_pkg_data.get(crs_name, {}).get('dependencies', [])
             crs_dind = 'dind' in crs_dependencies if crs_dependencies else False
+            crs_host_docker_builder = 'host_docker_builder' in crs_dependencies if crs_dependencies else False
+
+            # Get volumes from CRS config-crs.yaml
+            crs_volumes = crs_pkg_data.get(crs_name, {}).get('volumes', [])
 
             result.append({
                 'name': crs_name,
@@ -393,7 +452,9 @@ def get_crs_for_worker(worker_name: str, resource_config: Dict[str, Any],
                 'cpuset': format_cpu_list(crs_cpus_list),
                 'memory_limit': format_memory(crs_memory),
                 'suffix': 'runner',
-                'dind': crs_dind
+                'dind': crs_dind,
+                'host_docker_builder': crs_host_docker_builder,
+                'volumes': crs_volumes
             })
 
     return result
@@ -453,18 +514,16 @@ def _setup_compose_environment(config_dir: str, build_dir: str, oss_fuzz_path: s
         config_content = f.read()
     config_hash = hashlib.sha256(config_content).hexdigest()[:16]
 
-    # Create/validate crs_build_dir
+    # Create crs_build_dir (used for compose files and other outputs)
+    # Note: For run mode, build validation is done via Docker image existence check
+    # in render_run_compose() after we have the project/CRS information
     crs_build_dir = build_dir / 'crs' / config_hash
+    crs_build_dir.mkdir(parents=True, exist_ok=True)
     if mode == 'build':
-        crs_build_dir.mkdir(parents=True, exist_ok=True)
         logging.info(f'Using CRS build directory: {crs_build_dir}')
-    else:  # mode == 'run'
-        if not crs_build_dir.exists():
-            raise FileNotFoundError(f'CRS build directory not found: {crs_build_dir}. Please run build first.')
 
     # Output directory is the crs_build_dir
     output_dir = crs_build_dir
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Verify crs_registry exists
     if not registry_dir_path.exists():
@@ -568,7 +627,8 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
                               source_path: str = None, harness_source: str = None,
                               diff_path: str = None,
                               project_image_prefix: str = 'gcr.io/oss-fuzz',
-                              external_litellm: bool = False) -> str:
+                              external_litellm: bool = False,
+                              shared_seed_dir: str = None) -> str:
     """Render the compose template for a specific worker."""
     if not template_path.exists():
         raise FileNotFoundError(f"Template file not found: {template_path}")
@@ -586,6 +646,9 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
     source_tag = None
     if source_path:
         source_tag = hashlib.sha256(source_path.encode() + project.encode()).hexdigest()[:12]
+
+    # Get CRS_* environment variables from .env
+    crs_env_vars = get_crs_env_vars(config_dir)
 
     rendered = template.render(
         crs_list=crs_list,
@@ -608,7 +671,9 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
         harness_source=harness_source,
         diff_path=diff_path,
         parent_image_prefix=project_image_prefix,
-        external_litellm=external_litellm
+        external_litellm=external_litellm,
+        shared_seed_dir=shared_seed_dir,
+        crs_env_vars=crs_env_vars
     )
 
     return rendered
@@ -703,9 +768,13 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
                        source_path: str = None, env_file: str = None,
                        harness_source: str = None,
                        diff_path: str = None,
-                       external_litellm: bool = False) -> Tuple[str, str]:
+                       external_litellm: bool = False,
+                       shared_seed_dir: str = None) -> Tuple[str, str]:
     """
     Programmatic interface for run mode.
+
+    Args:
+        shared_seed_dir: Optional base directory for shared seeds between CRS instances
 
     Returns:
       Tuple of (config_hash, crs_build_dir)
@@ -736,6 +805,25 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
     if not crs_list:
         raise ValueError(f"No CRS instances configured for worker '{worker}'")
 
+    # Validate that CRS builder images exist (validates build was run)
+    # Compute source_tag if source_path is provided
+    source_tag = None
+    if source_path:
+        source_tag = hashlib.sha256(source_path.encode() + project.encode()).hexdigest()[:12]
+
+    for crs in crs_list:
+        crs_name = crs['name']
+        builder_image = f"{project}_{crs_name}_builder"
+        if source_tag:
+            builder_image += f":{source_tag}"
+
+        # Use check_any_tag=True when no source_tag, to find images built with source_path
+        if not check_image_exists(builder_image, check_any_tag=(source_tag is None)):
+            raise FileNotFoundError(
+                f"CRS builder image not found: {builder_image}. "
+                f"Please run 'oss-crs build' first to build the CRS."
+            )
+
     # Render compose-litellm.yaml (unless using external LiteLLM)
     if not external_litellm:
         litellm_rendered = render_litellm_compose(
@@ -765,7 +853,8 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
         source_path=source_path,
         harness_source=harness_source,
         diff_path=diff_path,
-        external_litellm=external_litellm
+        external_litellm=external_litellm,
+        shared_seed_dir=shared_seed_dir
     )
 
     output_file = output_dir / f"compose-{worker}.yaml"

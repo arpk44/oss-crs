@@ -17,8 +17,8 @@ from importlib.resources import files
 
 from dotenv import dotenv_values
 
-
 from . import render_compose
+from .utils import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -150,8 +150,8 @@ def _clone_oss_fuzz_if_needed(oss_fuzz_dir: Path, source_oss_fuzz_dir: Path = No
     try:
         # Create parent directory if needed
         oss_fuzz_dir.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.check_call([
-            'git', 'clone', 'https://github.com/google/oss-fuzz',
+        run_git([
+            'clone', 'https://github.com/google/oss-fuzz',
             str(oss_fuzz_dir)
         ])
         logging.info(f"Successfully cloned OSS-Fuzz to {oss_fuzz_dir}")
@@ -296,8 +296,8 @@ def _clone_project_source(project_name: str, oss_fuzz_dir: Path, build_dir: Path
     # Clone with depth 1 and recursive submodules
     logger.info(f"Cloning {main_repo} to {clone_dest}")
     try:
-        subprocess.check_call([
-            'git', 'clone',
+        run_git([
+            'clone',
             '--depth', '1',
             '--recursive',
             main_repo,
@@ -351,10 +351,7 @@ def build_crs(config_dir: Path, project_name: str, oss_fuzz_dir: Path, build_dir
         logger.error("Cannot use --clone with source_path (mutually exclusive)")
         return False
 
-    # Check if litellm keys are provided
-    if external_litellm and not _verify_external_litellm(config_dir):
-        logger.error("LITELLM_URL or LITELLM_KEY is not provided in the environment")
-        return False
+    # Note: No need to verify external_litellm during build - LiteLLM is only used during run
 
     if not _clone_oss_fuzz_if_needed(oss_fuzz_dir, source_oss_fuzz_dir):
         return False
@@ -459,27 +456,11 @@ def build_crs(config_dir: Path, project_name: str, oss_fuzz_dir: Path, build_dir
         logger.error('compose-build.yaml was not generated at: %s', compose_file)
         return False
 
-    # Project names for separate compose projects
-    litellm_project = f'crs-litellm-{config_hash}'
+    # Project name for build compose
     build_project = f'crs-build-{config_hash}'
 
-    # Start LiteLLM services in detached mode as separate project (unless using external)
-    if not external_litellm:
-        litellm_compose_file = crs_build_dir / 'compose-litellm.yaml'
-        if not litellm_compose_file.exists():
-            logger.error('compose-litellm.yaml was not generated at: %s', litellm_compose_file)
-            return False
-
-        logger.info('Starting LiteLLM services (project: %s)', litellm_project)
-        litellm_up_cmd = ['docker', 'compose', '-p', litellm_project,
-                          '-f', str(litellm_compose_file), 'up', '-d']
-        try:
-            subprocess.check_call(litellm_up_cmd)
-        except subprocess.CalledProcessError:
-            logger.error('Failed to start LiteLLM services')
-            return False
-    else:
-        logger.info('Using external LiteLLM instance')
+    # Note: LiteLLM is NOT needed during build - builder doesn't use LLM services
+    # LiteLLM is only started during run phase
 
     # Run docker compose up for each build profile
     completed_profiles = []
@@ -598,12 +579,6 @@ def build_crs(config_dir: Path, project_name: str, oss_fuzz_dir: Path, build_dir
                           '-f', str(compose_file),
                           'down', '--remove-orphans'])
 
-        # Stop LiteLLM services but keep them for reuse (unless using external)
-        if not external_litellm:
-            logger.info('Stopping LiteLLM services')
-            subprocess.run(['docker', 'compose', '-p', litellm_project,
-                           '-f', str(litellm_compose_file), 'stop'])
-
     return True
 
 
@@ -615,7 +590,8 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
             hints_dir: Path = None,
             harness_source: Path = None,
             diff_path: Path = None,
-            external_litellm: bool = False, source_oss_fuzz_dir: Path = None):
+            external_litellm: bool = False, source_oss_fuzz_dir: Path = None,
+            shared_seed_dir: Path = None, disable_shared_seed: bool = False):
     """
     Run CRS using docker compose.
 
@@ -637,6 +613,8 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
         diff_path: Optional path to diff file (Path, already resolved)
         external_litellm: Use external LiteLLM instance (default: False)
         source_oss_fuzz_dir: Optional source OSS-Fuzz directory to copy from (Path, already resolved)
+        shared_seed_dir: Optional base directory for shared seeds (Path, already resolved)
+        disable_shared_seed: Disable automatic shared seed directory for ensemble mode
 
     Returns:
         bool: True if successful, False otherwise
@@ -657,6 +635,39 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
     if not _validate_crs_modes(config_dir, worker, registry_dir, diff_path):
         return False
 
+    # Determine shared_seed_dir for ensemble mode
+    final_shared_seed_dir = None
+    if not disable_shared_seed:
+        if shared_seed_dir:
+            # User-provided path - append harness name
+            final_shared_seed_dir = shared_seed_dir / fuzzer_name
+        else:
+            # Check if ensemble mode (>1 CRS on same worker)
+            config_resource_path = config_dir / 'config-resource.yaml'
+            with open(config_resource_path) as f:
+                resource_config = yaml.safe_load(f)
+            crs_configs = resource_config.get('crs', {})
+            worker_crs_count = sum(
+                1 for cfg in crs_configs.values()
+                if worker in cfg.get('workers', [])
+            )
+            if worker_crs_count > 1:
+                final_shared_seed_dir = build_dir / 'shared_seed_dir' / project_name / fuzzer_name
+                logger.info(f'Ensemble mode detected ({worker_crs_count} CRS on worker {worker}). '
+                           f'Shared seeds directory: {final_shared_seed_dir}')
+
+    # Create per-CRS directories if shared seed is enabled
+    if final_shared_seed_dir:
+        config_resource_path = config_dir / 'config-resource.yaml'
+        with open(config_resource_path) as f:
+            resource_config = yaml.safe_load(f)
+        crs_configs = resource_config.get('crs', {})
+        for crs_name, cfg in crs_configs.items():
+            if worker in cfg.get('workers', []):
+                crs_seed_dir = final_shared_seed_dir / crs_name
+                crs_seed_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f'Created shared seed directory for {crs_name}: {crs_seed_dir}')
+
     # Generate compose files using render_compose module
     logger.info('Generating compose-%s.yaml', worker)
     fuzzer_command = [fuzzer_name] + fuzzer_args
@@ -674,7 +685,8 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
             fuzzer_command=fuzzer_command,
             harness_source=str(harness_source) if harness_source else None,
             diff_path=str(diff_path) if diff_path else None,
-            external_litellm=external_litellm
+            external_litellm=external_litellm,
+            shared_seed_dir=str(final_shared_seed_dir) if final_shared_seed_dir else None
         )
         crs_build_dir = Path(crs_build_dir)
     except Exception as e:
@@ -719,12 +731,24 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
 
     def cleanup():
         """Cleanup function for compose files"""
+        logger.info('cleanup')
         subprocess.run(compose_down_cmd)
         if not external_litellm:
             litellm_compose_file = crs_build_dir / 'compose-litellm.yaml'
             litellm_stop_cmd = ['docker', 'compose', '-p', litellm_project,
                                '-f', str(litellm_compose_file), 'stop']
             subprocess.run(litellm_stop_cmd)
+        # FIXME: Bandaid solution for permission issues when runner executes as root
+        uid = os.getuid()
+        gid = os.getgid()
+        logger.info(f'Changing ownership of {build_dir} to {uid}:{gid}')
+        chown_cmd = [
+            'docker', 'run', '--rm',
+            '-v', f'{build_dir}:/target',
+            'alpine',
+            'chown', '-R', f'{uid}:{gid}', '/target'
+        ]
+        subprocess.run(chown_cmd)
 
     def signal_handler(signum, frame):
         """Handle termination signals"""
@@ -739,10 +763,11 @@ def run_crs(config_dir: Path, project_name: str, fuzzer_name: str, fuzzer_args: 
     atexit.register(cleanup)
 
     # Only pass the run compose file (litellm is in separate project)
+    # --build ensures image is rebuilt if source files (run.sh, docker-compose.yml) changed
     compose_cmd = ['docker', 'compose',
                   '-p', run_project,
                   '-f', str(compose_file),
-                  'up', '--abort-on-container-exit']
+                  'up', '--build', '--abort-on-container-exit']
     try:
         subprocess.check_call(compose_cmd)
     except subprocess.CalledProcessError:

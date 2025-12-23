@@ -16,6 +16,27 @@ import shutil
 logger = logging.getLogger()
 
 
+def _copy_oss_fuzz_if_needed(
+    dest_oss_fuzz_dir: Path,
+    source_oss_fuzz_dir: Path,
+    overwrite: bool = False,
+) -> bool:
+    """Copy OSS-Fuzz to work directory."""
+    if dest_oss_fuzz_dir.exists():
+        if not overwrite:
+            logger.info(
+                f"OSS-Fuzz already exists at {dest_oss_fuzz_dir}, skipping copy"
+            )
+            return True
+        logger.info(f"Overwriting existing OSS-Fuzz at {dest_oss_fuzz_dir}")
+        shutil.rmtree(dest_oss_fuzz_dir)
+
+    logger.info(f"Copying OSS-Fuzz from {source_oss_fuzz_dir} to {dest_oss_fuzz_dir}")
+    dest_oss_fuzz_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_oss_fuzz_dir, dest_oss_fuzz_dir)
+    return True
+
+
 class OSSPatch:
     def __init__(self, project_name: str, crs_name: str | None = None):
         self.crs_name = crs_name
@@ -34,7 +55,12 @@ class OSSPatch:
         project_path: Path | None = None,
         source_path: Path | None = None,
         local_crs: Path | None = None,
+        registry_path: Path | None = None,
+        overwrite: bool = False,
+        use_gitcache: bool = False,
+        force_rebuild: bool = False,
     ) -> bool:
+        # TODO: better dectection to skip building
         assert self.crs_name
 
         if not prepare_docker_cache_builder():
@@ -44,16 +70,43 @@ class OSSPatch:
             self.crs_name,
             self.work_dir,
             local_crs=local_crs,
+            registry_path=registry_path,
+            use_gitcache=use_gitcache,
+            force_rebuild=force_rebuild,
         )
         if not crs_builder.build():
             return False
 
-        oss_fuzz_path = oss_fuzz_path.resolve()
-        project_path = (
-            Path(project_path).resolve()
-            if project_path
-            else oss_fuzz_path / "projects" / self.project_name
-        )
+        # Copy oss-fuzz to work directory
+        source_oss_fuzz = oss_fuzz_path.resolve()
+        dest_oss_fuzz = OSS_PATCH_WORK_DIR / "oss-fuzz"
+        if not _copy_oss_fuzz_if_needed(dest_oss_fuzz, source_oss_fuzz, overwrite):
+            logger.error("Failed to copy OSS-Fuzz")
+            return False
+        oss_fuzz_path = dest_oss_fuzz  # Use copied oss-fuzz from now on
+
+        # Copy project to oss-fuzz/projects/ if project_path provided
+        if project_path:
+            project_path = Path(project_path).resolve()
+            dest_project_path = oss_fuzz_path / "projects" / self.project_name
+
+            if dest_project_path.exists():
+                if not overwrite:
+                    logger.info(
+                        f"Project already exists at {dest_project_path}, skipping copy"
+                    )
+                else:
+                    logger.info(f"Overwriting existing project at {dest_project_path}")
+                    shutil.rmtree(dest_project_path)
+                    dest_project_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(project_path, dest_project_path)
+            else:
+                dest_project_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(project_path, dest_project_path)
+
+            project_path = dest_project_path
+        else:
+            project_path = oss_fuzz_path / "projects" / self.project_name
 
         if not source_path:
             source_path = self.work_dir / "project-src"
@@ -62,16 +115,17 @@ class OSSPatch:
                 change_ownership_with_docker(source_path)
                 shutil.rmtree(source_path)
 
-            pull_project_source(project_path, source_path)
+            pull_project_source(project_path, source_path, use_gitcache)
 
         assert source_path.exists()
-        assert is_git_repository(source_path)
+        assert is_git_repository(source_path)  # FIXME: should support non-git source
 
         project_builder = OSSPatchProjectBuilder(
             self.work_dir,
             self.project_name,
             oss_fuzz_path,
             project_path=project_path,
+            force_rebuild=force_rebuild,
         )
         if not project_builder.build(source_path):
             return False
@@ -103,7 +157,7 @@ class OSSPatch:
             litellm_api_key,
             litellm_api_base,
             hints_dir,
-            "full",
+            "full",  # TODO: support delta mode
         )
 
     # # Testing purpose function

@@ -73,7 +73,9 @@ def temp_build_context(path_name="temp_data"):
                 pass
 
 
-def _clone_project_repo(proj_yaml_path: Path, dst_path: Path) -> bool:
+def _clone_project_repo(
+    proj_yaml_path: Path, dst_path: Path, use_gitcache: bool = False
+) -> bool:
     if not proj_yaml_path.exists():
         logger.error(f'Target project "{proj_yaml_path}" not found')
         return False
@@ -89,7 +91,8 @@ def _clone_project_repo(proj_yaml_path: Path, dst_path: Path) -> bool:
         f'Cloning the target project repository from "{yaml_data["main_repo"]}" to "{dst_path}"'
     )
 
-    clone_command = f"git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
+    git_prefix = "gitcache " if use_gitcache else ""
+    clone_command = f"{git_prefix}git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
     # @TODO: how to properly handle `--shallow-submodules --recurse-submodules` options
 
     try:
@@ -171,12 +174,14 @@ class OSSPatchProjectBuilder:
         oss_fuzz_path: Path,
         project_path: Path,
         log_file: Path | None = None,
+        force_rebuild: bool = False,
     ):
         self.work_dir = work_dir
         self.project_name = project_name
         self.oss_fuzz_path = oss_fuzz_path.resolve()
         self.project_path = project_path
         self.log_file = log_file
+        self.force_rebuild = force_rebuild
 
         assert self.project_path.exists()
         assert (self.project_path / "project.yaml").exists()
@@ -337,7 +342,7 @@ class OSSPatchProjectBuilder:
         pull_cmd = f"docker pull {base_runner_image_name}"
 
         # command = (
-        #     f"docker run --rm --privileged --net=host "
+        #     f"docker run --rm --privileged --network=host "
         #     f"-v {volume_name}:{DEFAULT_DOCKER_ROOT_DIR} "
         #     f"-v {self.oss_fuzz_path}:/oss-fuzz "
         #     f"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} {pull_cmd}"
@@ -365,11 +370,13 @@ class OSSPatchProjectBuilder:
             self.oss_fuzz_path, self.project_name
         )
 
-        if docker_image_exists(builder_image_name):
-            logger.info(
-                f'The image "{builder_image_name}" already exists. Skip building it.'
-            )
-            return True
+        # FIXME: move up
+        if not self.force_rebuild:
+            if docker_image_exists(builder_image_name):
+                logger.info(
+                    f'The image "{builder_image_name}" already exists. Skip building it.'
+                )
+                return True
 
         logger.info(f'Building the image "{builder_image_name}"...')
 
@@ -396,27 +403,13 @@ class OSSPatchProjectBuilder:
 
         return True
 
-    def _detect_incremental_build(self, volume_name: str) -> bool:
-        '''
-        Check if the project_builder image contains `/usr/local/bin/replay_build.sh`
-
-        NOTE OSS-Fuzz's replay_build.sh generation now may fail,
-             so users of this function should not assume CAPTURE_REPLAY_BUILD
-             will result in replay_build.sh existing.
-             Similarly, REPLAY_ENABLED now works without replay_build.sh
-             by fallbacking to build.sh.
-        '''
-        if not docker_image_exists_in_volume(
-            get_builder_image_name(self.oss_fuzz_path, self.project_name), volume_name
-        ):
+    def _detect_incremental_build(self, image_name: str) -> bool:
+        # Check if the project_builder image contains `/usr/local/bin/replay_build.sh`
+        if not docker_image_exists(image_name):
+            logger.error(f'The image "{image_name}" does not exist in docker daemon')
             return False
 
-        command = (
-            f"docker run --rm --privileged "
-            f"-v {volume_name}:{DEFAULT_DOCKER_ROOT_DIR} "
-            f"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} "
-            f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} stat /usr/local/bin/replay_build.sh"
-        )
+        command = f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} stat /usr/local/bin/replay_build.sh"
 
         # subprocess.check_call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
 
@@ -444,6 +437,12 @@ class OSSPatchProjectBuilder:
         )
 
         old_workdir = _workdir_from_dockerfile(project_path, self.project_name)
+        if self._detect_incremental_build(builder_image_name):
+            logger.info(
+                f'Builder image "{builder_image_name}" is already a snapshot image for incremental build'
+            )
+            return True
+
         new_src_dir = "/built-src"
         new_workdir = old_workdir.replace("/src", new_src_dir, 1)
         test_src_dir = "/test-src"
@@ -495,7 +494,7 @@ class OSSPatchProjectBuilder:
 
         try:
             create_container_command = (
-                f"docker create --privileged --net=host "
+                f"docker create --privileged --network=host "
                 f"--env=SANITIZER={sanitizer} "
                 f"--env=CCACHE_DIR=/workspace/ccache "
                 f"--env=FUZZING_LANGUAGE={self.project_lang} "

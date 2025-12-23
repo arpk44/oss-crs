@@ -1,7 +1,9 @@
 """Tests for render_compose.py module."""
 
 import pytest
-from bug_finding.src.render_compose import parse_cpu_range, format_cpu_list
+import tempfile
+from pathlib import Path
+from bug_finding.src.render_compose import parse_cpu_range, format_cpu_list, get_crs_env_vars
 
 
 class TestParseCpuRange:
@@ -104,3 +106,50 @@ class TestRoundTrip:
         formatted = format_cpu_list(parsed)
         reparsed = parse_cpu_range(formatted)
         assert reparsed == parsed
+
+
+class TestGetCrsEnvVars:
+    """Test get_crs_env_vars function."""
+
+    def test_extracts_crs_prefixed_vars(self):
+        """Test that only CRS_* prefixed vars are extracted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = Path(tmpdir) / ".env"
+            env_file.write_text(
+                "CRS_CACHE_DIR=/path/to/cache\n"
+                "CRS_INPUT_GENS=given_fuzzer\n"
+                "CRS_SKIP_SAVE=True\n"
+                "POSTGRES_PASSWORD=secret\n"
+                "OPENAI_API_KEY=sk-123\n"
+            )
+            result = get_crs_env_vars(Path(tmpdir))
+            assert result == ['CRS_CACHE_DIR', 'CRS_INPUT_GENS', 'CRS_SKIP_SAVE']
+
+    def test_returns_sorted_list(self):
+        """Test that vars are returned sorted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = Path(tmpdir) / ".env"
+            env_file.write_text(
+                "CRS_ZEBRA=z\n"
+                "CRS_ALPHA=a\n"
+                "CRS_MIDDLE=m\n"
+            )
+            result = get_crs_env_vars(Path(tmpdir))
+            assert result == ['CRS_ALPHA', 'CRS_MIDDLE', 'CRS_ZEBRA']
+
+    def test_returns_empty_list_when_no_env_file(self):
+        """Test that empty list is returned when .env doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = get_crs_env_vars(Path(tmpdir))
+            assert result == []
+
+    def test_returns_empty_list_when_no_crs_vars(self):
+        """Test that empty list is returned when no CRS_* vars exist."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = Path(tmpdir) / ".env"
+            env_file.write_text(
+                "POSTGRES_PASSWORD=secret\n"
+                "OPENAI_API_KEY=sk-123\n"
+            )
+            result = get_crs_env_vars(Path(tmpdir))
+            assert result == []

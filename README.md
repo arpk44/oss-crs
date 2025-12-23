@@ -213,6 +213,41 @@ uv run oss-bugfind-crs build --external-litellm example_configs/atlantis-c-libaf
 uv run oss-bugfind-crs run --external-litellm example_configs/atlantis-c-libafl json-c json_array_fuzzer
 ```
 
+### Shared Seed Directory (`--shared-seed-dir`, `--disable-shared-seed`)
+
+Enable cross-CRS seed sharing for ensemble mode. When multiple CRS instances run on the same worker, they can share discovered seeds to improve overall fuzzing coverage.
+
+**Auto-detection (default)**: When running an ensemble configuration with more than one CRS on the same worker, shared seed directories are automatically created at `build/shared_seed_dir/{project}/{harness_name}/`.
+
+```bash
+# Ensemble mode - shared seeds auto-enabled
+uv run oss-bugfind-crs run example_configs/ensemble-c json-c json_array_fuzzer
+# Creates: build/shared_seed_dir/json-c/json_array_fuzzer/atlantis-c-libafl/
+#          build/shared_seed_dir/json-c/json_array_fuzzer/crs-libfuzzer/
+```
+
+**Explicit path**: Override the base shared seed directory location (harness name is appended automatically).
+
+```bash
+uv run oss-bugfind-crs run example_configs/ensemble-c json-c json_array_fuzzer \
+    --shared-seed-dir /custom/shared/path
+# Creates: /custom/shared/path/json_array_fuzzer/atlantis-c-libafl/
+#          /custom/shared/path/json_array_fuzzer/crs-libfuzzer/
+```
+
+**Disable sharing**: Opt out of automatic shared seed directory creation.
+
+```bash
+uv run oss-bugfind-crs run example_configs/ensemble-c json-c json_array_fuzzer \
+    --disable-shared-seed
+```
+
+**Mount structure inside containers**:
+- Each CRS gets read-write access to its own directory: `/seed_share_dir/{crs_name}/`
+- Each CRS gets read-only access to other CRS directories: `/seed_share_dir/{other_crs_name}/`
+
+This enables CRS implementations to periodically sync discovered seeds across the ensemble while preventing write conflicts.
+
 ### Custom project path
 
 Provide a custom OSS-Fuzz compatible project directory with `--project-path`.
@@ -270,6 +305,51 @@ uv run oss-bugfind-crs build --clone \
 - `--clone` and `source_path` are mutually exclusive
 - Standard OSS-Fuzz projects already clone source in their Dockerfile, so `--clone` is not needed for them
 - The `project.yaml` must contain a `main_repo` field with a valid git URL
+
+### Gitcache Support (`--gitcache`)
+
+Both `bug_finding` and `bug_fixing` packages support [gitcache](https://github.com/seeraven/gitcache) to accelerate git clone operations through local caching.
+
+Gitcache is a tool that caches git repositories locally and serves them via HTTP. This significantly speeds up repeated git clone operations, which is especially useful when:
+- Repeatedly building CRSs (clones CRS repositories from registry)
+- Cloning OSS-Fuzz repository
+- Cloning project sources with `--clone`
+- Working with large repositories or slow network connections
+
+**Installation:**
+
+```bash
+# Install gitcache (requires Python)
+pip install gitcache
+```
+
+**Usage:**
+
+```bash
+# Build with gitcache
+uv run oss-bugfind-crs build --gitcache example_configs/ensemble-c json-c
+
+# Run with gitcache
+uv run oss-bugfind-crs run --gitcache example_configs/ensemble-c json-c json_array_fuzzer
+
+# Bug fixing with gitcache
+uv run oss-bugfix-crs build --gitcache my-crs my-project --oss-fuzz ~/oss-fuzz
+```
+
+**How it works:**
+
+When `--gitcache` is enabled, all git operations (clone, checkout, submodule update) are prefixed with `gitcache`, which:
+1. Checks if the repository is cached locally
+2. If cached, serves it from the local cache (fast)
+3. If not cached, clones from remote and caches it for future use
+
+**Affected operations:**
+- CRS repository cloning (from registry)
+- OSS-Fuzz repository cloning
+- Project source cloning (when using `--clone`)
+- Git submodule updates
+
+For more information about gitcache, see: https://github.com/seeraven/gitcache
 
 ## Supported CRSs
 

@@ -7,11 +7,13 @@ import sys
 from pathlib import Path
 
 from .crs_main import build_crs, run_crs
+from .utils import set_gitcache
 
 
 def main():
     """Main entry point for CRS CLI."""
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    # FIXME: does not work
+    # logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
     parser = argparse.ArgumentParser(
         description='CRS (Cyber Reasoning System) build and run tool'
@@ -47,6 +49,8 @@ def main():
                               help='Overwrite existing project in oss-fuzz/projects/ when using project_path')
     build_parser.add_argument('--clone', action='store_true',
                               help='Clone project source from main_repo in project.yaml (for custom projects)')
+    build_parser.add_argument('--gitcache', action='store_true',
+                              help='Use gitcache for git clone operations')
 
     # run_crs subcommand
     run_parser = subparsers.add_parser('run', help='Run CRS')
@@ -78,6 +82,12 @@ def main():
                             help='Path to diff file for analysis')
     run_parser.add_argument('--external-litellm', action='store_true',
                             help='Use external LiteLLM instance (requires LITELLM_URL and LITELLM_KEY env vars)')
+    run_parser.add_argument('--gitcache', action='store_true',
+                            help='Use gitcache for git clone operations')
+    run_parser.add_argument('--shared-seed-dir', type=Path, default=None,
+                            help='Base directory for shared seeds (default: build/shared/{project}/ for ensemble)')
+    run_parser.add_argument('--disable-shared-seed', action='store_true',
+                            help='Disable automatic shared seed directory for ensemble mode')
 
     args = parser.parse_args()
 
@@ -99,6 +109,9 @@ def main():
 
     # Resolve source oss-fuzz directory if provided (for copying)
     source_oss_fuzz_dir = args.oss_fuzz_dir.resolve() if args.oss_fuzz_dir else None
+
+    # Set gitcache mode
+    set_gitcache(args.gitcache)
 
     if args.command == 'build':
         # Build kwargs, only including non-None optional arguments
@@ -169,6 +182,11 @@ def main():
             run_kwargs['diff_path'] = diff_path
         if source_oss_fuzz_dir:
             run_kwargs['source_oss_fuzz_dir'] = source_oss_fuzz_dir
+
+        # Shared seed directory options
+        if args.shared_seed_dir:
+            run_kwargs['shared_seed_dir'] = args.shared_seed_dir.resolve()
+        run_kwargs['disable_shared_seed'] = getattr(args, 'disable_shared_seed', False)
 
         result = run_crs(**run_kwargs)
     else:

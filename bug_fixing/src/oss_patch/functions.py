@@ -16,6 +16,7 @@ import shutil
 import logging
 import re
 import yaml
+import git
 
 logger = logging.getLogger()
 
@@ -66,7 +67,9 @@ def load_image_to_volume(volume_name: str) -> bool:
 
 
 def change_ownership_with_docker(target_path: Path) -> bool:
-    command = f"docker run --rm --privileged -v {target_path}:/target {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} chown -R {os.getuid()} /target"
+    uid = os.getuid()
+    gid = os.getgid()
+    command = f"docker run --rm --privileged -v {target_path.resolve()}:/target {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} chown -R {uid}:{gid} /target"
 
     proc = subprocess.run(
         command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True
@@ -78,10 +81,12 @@ def change_ownership_with_docker(target_path: Path) -> bool:
         return False
 
 
-def pull_project_source(project_path: Path, dst_path: Path) -> bool:
+def pull_project_source(
+    project_path: Path, dst_path: Path, use_gitcache: bool = False
+) -> bool:
     assert project_path.exists()
 
-    if not _clone_project_repo(project_path, dst_path):
+    if not _clone_project_repo(project_path, dst_path, use_gitcache):
         logger.error("Cloning target project source code has failed.")
         return False
 
@@ -92,7 +97,9 @@ def pull_project_source(project_path: Path, dst_path: Path) -> bool:
     return True
 
 
-def _clone_project_repo(project_path: Path, dst_path: Path) -> bool:
+def _clone_project_repo(
+    project_path: Path, dst_path: Path, use_gitcache: bool = False
+) -> bool:
     proj_yaml_path = project_path / "project.yaml"
     if not proj_yaml_path.exists():
         logger.error(f'Target project "{proj_yaml_path}" not found')
@@ -109,7 +116,8 @@ def _clone_project_repo(project_path: Path, dst_path: Path) -> bool:
         f'Cloning the target project repository from "{yaml_data["main_repo"]}" to "{dst_path}"'
     )
 
-    clone_command = f"git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
+    git_prefix = "gitcache " if use_gitcache else ""
+    clone_command = f"{git_prefix}git clone {yaml_data['main_repo']} --shallow-submodules --recurse-submodules {dst_path}"
     # @TODO: how to properly handle `--shallow-submodules --recurse-submodules` options
 
     try:
@@ -188,6 +196,7 @@ def load_images_to_volume(images: list[str], volume_name: str) -> bool:
                 logger.error(f'"{image_name}" does not exist in docker daemon')
                 return False
 
+            # TODO: skip save if already exists
             subprocess.run(
                 f"docker save -o {images_path / image_name.split('/')[-1]}.tar {image_name}",
                 shell=True,
@@ -195,6 +204,7 @@ def load_images_to_volume(images: list[str], volume_name: str) -> bool:
                 stderr=subprocess.DEVNULL,
             )
 
+        # TODO: skip save if already exists
         docker_load_cmd = (
             f"docker run --privileged --rm "
             f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS}:{DEFAULT_DOCKER_ROOT_DIR} "
@@ -415,7 +425,7 @@ def run_command(command: str, n: int = 5, log_file: Path | None = None) -> None:
 def _build_docker_cache_builder_image() -> bool:
     try:
         run_command(
-            f"docker build --tag {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} --file {OSS_PATCH_CACHE_BUILDER_DATA_PATH / 'Dockerfile'} {str(Path.cwd())}"
+            f"docker build --network=host --tag {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} --file {OSS_PATCH_CACHE_BUILDER_DATA_PATH / 'Dockerfile'} {str(Path.cwd())}"
         )
 
         return True
@@ -501,3 +511,6 @@ def get_cpv_config(project_path: Path, harness_name: str, cpv_name: str) -> dict
     return None
 
 
+def get_git_commit_hash(repository_path: Path) -> str:
+    repo = git.Repo(repository_path)
+    return repo.head.object.hexsha

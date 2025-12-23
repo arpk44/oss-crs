@@ -1,9 +1,11 @@
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from datetime import datetime
 from .oss_patch import OSSPatch
+from .oss_patch.functions import change_ownership_with_docker
 
 
 logger = logging.getLogger(__name__)
@@ -66,17 +68,38 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
             _get_path_or_none(args.project_path),
             _get_path_or_none(args.source_path),
             _get_path_or_none(args.local_crs),
+            _get_path_or_none(args.registry),
+            args.overwrite,
+            args.gitcache,
+            args.force_rebuild,
         )
     elif args.command == "run":
+        # Resolve litellm config: CLI args > env vars
+        litellm_base = args.litellm_base or os.environ.get("LITELLM_API_BASE")
+        litellm_key = args.litellm_key or os.environ.get("LITELLM_API_KEY")
+
+        if not litellm_base:
+            logger.error(
+                "LiteLLM API base not set. Use --litellm-base or set LITELLM_API_BASE env var."
+            )
+            return 1
+        if not litellm_key:
+            logger.error(
+                "LiteLLM API key not set. Use --litellm-key or set LITELLM_API_KEY env var."
+            )
+            return 1
+
         oss_patch = OSSPatch(args.project, crs_name=args.crs)
         result = oss_patch.run_crs(
             args.harness,
             Path(args.povs),
-            args.litellm_key,
-            args.litellm_base,
+            litellm_key,
+            litellm_base,
             _get_path_or_none(args.hints),
             Path(args.out),
         )
+        # FIXME: Bandaid solution for permission issues when runner executes as root
+        change_ownership_with_docker(Path(args.out))
     elif args.command == "test-inc-build":
         oss_patch = OSSPatch(args.project)
         log_dir = Path(args.log_dir) if args.log_dir else oss_patch.work_dir / "logs"
@@ -144,6 +167,26 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
         "Requires --project-path",
         default=None,
     )
+    build_crs_parser.add_argument(
+        "--registry",
+        help="Path to CRS registry directory (default: ../crs_registry relative to package)",
+        default=None,
+    )
+    build_crs_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Overwrite existing oss-fuzz and project directories if they exist",
+    )
+    build_crs_parser.add_argument(
+        "--gitcache",
+        action="store_true",
+        help="Use gitcache for git clone and submodule operations",
+    )
+    build_crs_parser.add_argument(
+        "--force-rebuild",
+        action="store_true",
+        help="Force rebuild images even if they already exist",
+    )
 
     build_crs_parser.set_defaults(clean=False)
 
@@ -167,10 +210,10 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
         "--out", required=True, help="path to crs output directory"
     )
     run_crs_parser.add_argument(
-        "--litellm-base", required=True, help="address of litellm API base"
+        "--litellm-base", help="address of litellm API base (env: LITELLM_API_BASE)"
     )
     run_crs_parser.add_argument(
-        "--litellm-key", required=True, help="The API key for litellm"
+        "--litellm-key", help="The API key for litellm (env: LITELLM_API_KEY)"
     )
 
     run_pov_parser = subparsers.add_parser(
