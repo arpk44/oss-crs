@@ -224,8 +224,8 @@ class IncrementalBuildChecker:
 
         # measure consumed time
         cur_time = time.time()
-        build_fail_logs = self.project_builder.build_fuzzers(source_path, use_inc_image=True)
-        self.build_time_with_inc_build = time.time() - cur_time
+        build_fail_logs = self.project_builder.build_fuzzers(source_path, sanitizer=sanitizer, use_inc_image=True)
+        self.build_time_with_inc_build[sanitizer] = time.time() - cur_time
 
         if build_fail_logs:
             stdout, stderr = build_fail_logs
@@ -241,7 +241,7 @@ class IncrementalBuildChecker:
             return False
 
         logger.info(
-            f"Build time with incremental build ({sanitizer}): {build_time}"
+            f"Build time with incremental build ({sanitizer}): {self.build_time_with_inc_build[sanitizer]}"
         )
 
         change_ownership_with_docker(source_path)
@@ -307,6 +307,8 @@ class IncrementalBuildChecker:
                     logger.error(f'crash is not detected for "{pov_name}"')
                     print(stdout.decode(errors='replace'))
                     return False
+                else:
+                    logger.info(f'crash is detected for "{pov_name}"')
 
                 patch_path = aixcc_dir / "patches" / harness_name / f"{pov_name}.diff"
                 assert patch_path.exists(), patch_path
@@ -334,7 +336,10 @@ class IncrementalBuildChecker:
                     logger.error(
                         f'crash is detected for "{pov_name}" with a patch "{patch_path}"'
                     )
+                    print(stdout.decode(errors='replace'))
                     return False
+                else:
+                    logger.info(f'crash is not detected for "{pov_name}" with a patch "{patch_path}"')
 
                 logger.info(f'Incremental build for "{pov_name}" has been validated')
 
