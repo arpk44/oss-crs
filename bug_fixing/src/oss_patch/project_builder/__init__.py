@@ -32,20 +32,22 @@ WORKDIR_REGEX = re.compile(r"\s*WORKDIR\s*([^\s]+)")
 
 PATCH_SNIPPET_FOR_COMPILE = """
 #################### OSS-PATCH: script for patched run ####################
-# `/built-src/{proj-src}` to `/src/{proj-src}`
-export MOUNTED_SRC_DIR=$(echo $PWD | sed 's/built-src/src/')
-pushd $MOUNTED_SRC_DIR 
+if [[ "$PWD" == *"built-src"* ]]; then
+    # `/built-src/{proj-src}` to `/src/{proj-src}`
+    export MOUNTED_SRC_DIR=$(echo $PWD | sed 's/built-src/src/')
+    pushd $MOUNTED_SRC_DIR 
 
-# Now in /src/{proj-src}
-git config --global --add safe.directory $MOUNTED_SRC_DIR 
-git diff HEAD > /tmp/patch.diff
+    # Now in /src/{proj-src}
+    git config --global --add safe.directory $MOUNTED_SRC_DIR 
+    git diff HEAD > /tmp/patch.diff
 
-popd
-# Now returned to `/built-src/{proj-src}`
-if [ -s /tmp/patch.diff ]; then
-    git apply /tmp/patch.diff
-else
-    echo "No patch file found at /tmp/patch.diff or it is empty. Skipping git apply."
+    popd
+    # Now returned to `/built-src/{proj-src}`
+    if [ -s /tmp/patch.diff ]; then
+        git apply /tmp/patch.diff
+    else
+        echo "No patch file found at /tmp/patch.diff or it is empty. Skipping git apply."
+    fi
 fi
 #################### OSS-PATCH: script for patched run ####################
 """
@@ -409,18 +411,27 @@ class OSSPatchProjectBuilder:
             logger.error(f'The image "{image_name}" does not exist in docker daemon')
             return False
 
-        command = f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} stat /usr/local/bin/replay_build.sh"
+        # command = f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} stat /usr/local/bin/replay_build.sh"
+        command = f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} pwd"
 
         # subprocess.check_call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
 
         proc = subprocess.run(
-            command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True
+            command, capture_output=True, shell=True
         )
+        # proc = subprocess.run(
+        #     command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True
+        # )
 
-        if proc.returncode == 0:
+        if proc.stdout.decode().startswith("/built-src"):
             return True
         else:
             return False
+
+        # if proc.returncode == 0:
+        #     return True
+        # else:
+        #     return False
 
     def _take_incremental_build_snapshot_for_c(
             self, source_path: Path, rts_enabled: bool = False, sanitizer: str = "address"
