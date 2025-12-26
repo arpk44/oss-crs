@@ -628,7 +628,8 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
                               diff_path: str = None,
                               project_image_prefix: str = 'gcr.io/oss-fuzz',
                               external_litellm: bool = False,
-                              shared_seed_dir: str = None) -> str:
+                              shared_seed_dir: str = None,
+                              harness_name: str = None) -> str:
     """Render the compose template for a specific worker."""
     if not template_path.exists():
         raise FileNotFoundError(f"Template file not found: {template_path}")
@@ -669,6 +670,7 @@ def render_compose_for_worker(worker_name: str, crs_list: List[Dict[str, Any]],
         source_path=source_path,
         source_tag=source_tag,
         harness_source=harness_source,
+        harness_name=harness_name,
         diff_path=diff_path,
         parent_image_prefix=project_image_prefix,
         external_litellm=external_litellm,
@@ -835,6 +837,9 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
         litellm_output_file = output_dir / "compose-litellm.yaml"
         litellm_output_file.write_text(litellm_rendered)
 
+    # Extract harness_name from fuzzer_command (first element is the fuzzer/harness name)
+    harness_name = fuzzer_command[0] if fuzzer_command else None
+
     # Render compose file
     rendered = render_compose_for_worker(
         worker_name=worker,
@@ -854,7 +859,8 @@ def render_run_compose(config_dir: str, build_dir: str, oss_fuzz_dir: str,
         harness_source=harness_source,
         diff_path=diff_path,
         external_litellm=external_litellm,
-        shared_seed_dir=shared_seed_dir
+        shared_seed_dir=shared_seed_dir,
+        harness_name=harness_name
     )
 
     output_file = output_dir / f"compose-{worker}.yaml"

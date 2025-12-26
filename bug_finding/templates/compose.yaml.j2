@@ -136,6 +136,12 @@ services:
 {%- if crs.host_docker_builder %}
       - HOST_OUT_DIR={{ build_dir }}/out/{{ crs.name }}/{{ project }}
       - HOST_ARTIFACT_DIR={{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}
+{%- if harness_name %}
+      # Per-harness HOST paths for nested containers (host_docker_builder mode)
+      - HOST_POV_DIR={{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}/run/{{ harness_name }}/povs
+      - HOST_CORPUS_DIR={{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}/run/{{ harness_name }}/corpus
+      - HOST_CRS_DATA_DIR={{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}/run/{{ harness_name }}/crs-data
+{%- endif %}
 {%- if not external_litellm %}
       - CRS_EXTERNAL_NETWORK={{ config_hash }}_crs_network
 {%- endif %}
@@ -149,6 +155,12 @@ services:
     volumes:
       - {{ build_dir }}/out/{{ crs.name }}/{{ project }}:/out
       - {{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}:/artifacts
+{%- if harness_name %}
+      # Per-harness artifact overlays (povs, corpus, crs-data are per-harness)
+      - {{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}/run/{{ harness_name }}/povs:/artifacts/povs
+      - {{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}/run/{{ harness_name }}/corpus:/artifacts/corpus
+      - {{ build_dir }}/artifacts/{{ crs.name }}/{{ project }}/run/{{ harness_name }}/crs-data:/artifacts/crs-data
+{%- endif %}
 {%- if not external_litellm %}
       - {{ volume_name('keys_data', crs.name) }}:/keys:ro
 {%- endif %}
