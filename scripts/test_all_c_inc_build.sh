@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Test all C projects with incremental build (no RTS)
+# Test all C projects with incremental build
+# Uses project.yaml inc_build and rts_mode settings for each project
 
 set -e
 
@@ -21,6 +22,8 @@ usage() {
     echo "  -j, --jobs N     Number of parallel jobs (default: 1)"
     echo "  -l, --list FILE  File containing project names (one per line)"
     echo "  -h, --help       Show this help message"
+    echo ""
+    echo "Note: inc_build and rts_mode are determined by each project's project.yaml setting."
     exit 1
 }
 
@@ -65,6 +68,7 @@ mkdir -p "$LOG_DIR" "$RESULT_DIR"
 
 echo "=========================================="
 echo "C Incremental Build Test Runner"
+echo "(using project.yaml settings)"
 echo "=========================================="
 echo "OSS-Fuzz path: $OSS_FUZZ_PATH"
 echo "C projects:   $C_PROJECTS_DIR"
@@ -102,7 +106,8 @@ run_single_test() {
     local log_file="$log_dir/${project}.log"
     local result_file="$result_dir/${project}.result"
 
-    if uv run oss-bugfix-crs test-inc-build "aixcc/c/$project" "$oss_fuzz_path" > "$log_file" 2>&1; then
+    # Use --with-rts to enable RTS based on project.yaml rts_mode setting
+    if uv run oss-bugfix-crs test-inc-build "aixcc/c/$project" "$oss_fuzz_path" --with-rts > "$log_file" 2>&1; then
         echo "PASSED" > "$result_file"
     else
         echo "FAILED" > "$result_file"
@@ -120,7 +125,8 @@ if [ "$JOBS" -eq 1 ]; then
         log_file="$LOG_DIR/${project}.log"
         result_file="$RESULT_DIR/${project}.result"
 
-        if uv run oss-bugfix-crs test-inc-build "aixcc/c/$project" "$OSS_FUZZ_PATH" > "$log_file" 2>&1; then
+        # Use --with-rts to enable RTS based on project.yaml rts_mode setting
+        if uv run oss-bugfix-crs test-inc-build "aixcc/c/$project" "$OSS_FUZZ_PATH" --with-rts > "$log_file" 2>&1; then
             echo "  ✓ PASSED"
             echo "PASSED" > "$result_file"
         else
@@ -178,8 +184,8 @@ fi
 
 # Write summary to file
 cat > "$LOG_DIR/summary.txt" << EOF
-C Incremental Build Test Summary
-================================
+C Incremental Build Test Summary (using project.yaml settings)
+===============================================================
 Date: $(date)
 Parallel Jobs: $JOBS
 Total: $total
