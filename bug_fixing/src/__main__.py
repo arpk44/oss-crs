@@ -107,7 +107,22 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
         logger.info(f"Logging to: {log_file}")
         result = oss_patch.test_inc_build(
             Path(args.oss_fuzz), with_rts=args.with_rts, rts_tool=args.rts_tool,
-            log_file=log_file, skip_clone=args.skip_clone, skip_baseline=args.skip_baseline
+            log_file=log_file, skip_clone=args.skip_clone, skip_baseline=args.skip_baseline,
+            skip_snapshot=args.skip_snapshot
+        )
+    elif args.command == "make-inc-snapshot":
+        oss_patch = OSSPatch(args.project)
+        log_dir = Path(args.log_dir) if args.log_dir else oss_patch.work_dir / "logs"
+        log_file = _setup_file_logging(log_dir, args.project)
+        logger.info(f"Logging to: {log_file}")
+        result = oss_patch.make_inc_snapshot(
+            Path(args.oss_fuzz),
+            with_rts=args.with_rts,
+            rts_tool=args.rts_tool,
+            push=args.push,
+            force_rebuild=not args.no_rebuild,
+            log_file=log_file,
+            skip_clone=args.skip_clone,
         )
     # elif args.command == "run_pov":
     #     oss_patch = OSSPatch(args.project)
@@ -287,6 +302,49 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
     )
     test_project_parser.add_argument("project", help="name of the project")
     test_project_parser.add_argument("oss_fuzz", help="path to OSS-Fuzz")
+
+    # make-inc-snapshot subcommand
+    make_inc_snapshot_parser = subparsers.add_parser(
+        "make-inc-snapshot",
+        help="Create incremental build snapshot and optionally push to registry.",
+    )
+    make_inc_snapshot_parser.add_argument("project", help="name of the project")
+    make_inc_snapshot_parser.add_argument("oss_fuzz", help="path to OSS-Fuzz")
+    make_inc_snapshot_parser.add_argument(
+        "--with-rts",
+        action="store_true",
+        default=False,
+        help="Enable RTS (Regression Test Selection) in snapshot.",
+    )
+    make_inc_snapshot_parser.add_argument(
+        "--rts-tool",
+        choices=["ekstazi", "jcgeks", "openclover"],
+        default="jcgeks",
+        help="RTS tool to use (default: jcgeks). Only used when --with-rts is specified.",
+    )
+    make_inc_snapshot_parser.add_argument(
+        "--push",
+        action="store_true",
+        default=False,
+        help="Push the snapshot image to Docker registry (ghcr.io/team-atlanta/crsbench/{project}).",
+    )
+    make_inc_snapshot_parser.add_argument(
+        "--no-rebuild",
+        action="store_true",
+        default=False,
+        help="Skip rebuild if local snapshot image already exists. Just tag and push.",
+    )
+    make_inc_snapshot_parser.add_argument(
+        "--skip-clone",
+        action="store_true",
+        default=False,
+        help="Skip source code cloning and use existing code at {work_dir}/project-src.",
+    )
+    make_inc_snapshot_parser.add_argument(
+        "--log-dir",
+        default=None,
+        help="Directory to save log files. Default: {work_dir}/logs/",
+    )
 
     # list_parser = manage_subparsers.add_parser(
     #     "list", help="list existing CRS-related images"

@@ -3,6 +3,7 @@ from .crs_builder import OSSPatchCRSBuilder
 from .project_builder import OSSPatchProjectBuilder
 from .crs_runner import OSSPatchCRSRunner
 from .inc_build_checker import IncrementalBuildChecker
+from .inc_build_checker import IncrementalSnapshotMaker
 from .globals import OSS_PATCH_WORK_DIR
 from .functions import (
     prepare_docker_cache_builder,
@@ -184,6 +185,7 @@ class OSSPatch:
         log_file: Path | None = None,
         skip_clone: bool = False,
         skip_baseline: bool = False,
+        skip_snapshot: bool = False,
     ) -> bool:
         oss_fuzz_path = oss_fuzz_path.resolve()
         if source_path:
@@ -228,5 +230,47 @@ class OSSPatch:
                 with_rts=effective_with_rts,
                 rts_tool=effective_rts_mode if effective_with_rts else "jcgeks",
                 skip_clone=skip_clone,
-                skip_baseline=skip_baseline
+                skip_baseline=skip_baseline,
+                skip_snapshot=skip_snapshot
             )
+
+    def make_inc_snapshot(
+        self,
+        oss_fuzz_path: Path,
+        with_rts: bool = False,
+        rts_tool: str = "jcgeks",
+        push: bool = False,
+        force_rebuild: bool = True,
+        source_path: Path | None = None,
+        log_file: Path | None = None,
+        skip_clone: bool = False,
+    ) -> bool:
+        """Create incremental build snapshot and optionally push to registry.
+
+        This assumes test-inc-build has already been run successfully.
+
+        Args:
+            oss_fuzz_path: Path to OSS-Fuzz repository
+            with_rts: Enable RTS in snapshot
+            rts_tool: RTS tool to use (ekstazi, jcgeks, openclover)
+            push: Whether to push snapshot to Docker registry
+            force_rebuild: Force rebuild even if image exists (default: True)
+            source_path: Path to source code (optional)
+            log_file: Path to log file (optional)
+            skip_clone: Skip source code cloning
+        """
+        oss_fuzz_path = oss_fuzz_path.resolve()
+        if source_path:
+            source_path = source_path.resolve()
+
+        maker = IncrementalSnapshotMaker(
+            oss_fuzz_path, self.project_name, self.work_dir, log_file=log_file
+        )
+
+        return maker.make_snapshot(
+            with_rts=with_rts,
+            rts_tool=rts_tool,
+            push=push,
+            force_rebuild=force_rebuild,
+            skip_clone=skip_clone,
+        )
