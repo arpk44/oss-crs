@@ -60,10 +60,49 @@ def _convert_time_to_seconds(time_str: str) -> float:
     return time_second
 
 
+def _parse_rts_markers(log_file: Path) -> tuple[int, int, int]:
+    """Parse standardized [RTS] markers from a log file.
+
+    See docs/rts-output-standard.md for format specification.
+
+    Returns:
+        (rts_total, rts_selected, rts_excluded) - all 0 if no markers found
+    """
+    rts_total = 0
+    rts_selected = 0
+    rts_excluded = 0
+
+    try:
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if not line.startswith("[RTS]"):
+                    continue
+
+                total_match = re.search(r'\[RTS\]\s*Total:\s*(\d+)', line)
+                if total_match:
+                    rts_total = int(total_match.group(1))
+                    continue
+
+                selected_match = re.search(r'\[RTS\]\s*Selected:\s*(\d+)', line)
+                if selected_match:
+                    rts_selected = int(selected_match.group(1))
+                    continue
+
+                excluded_match = re.search(r'\[RTS\]\s*Excluded:\s*(\d+)', line)
+                if excluded_match:
+                    rts_excluded = int(excluded_match.group(1))
+                    continue
+    except Exception as e:
+        logger.warning(f"Error parsing [RTS] markers: {e}")
+
+    return rts_total, rts_selected, rts_excluded
+
+
 def analysis_log(log_file: Path, language: str = "jvm", test_mode: str | None = None):
     """Analyze test log file and extract statistics.
 
     Dispatches to appropriate parser based on language and test_mode.
+    Also checks for standardized [RTS] markers that override framework counts.
 
     Args:
         log_file: Path to the test log file
@@ -82,21 +121,38 @@ def analysis_log(log_file: Path, language: str = "jvm", test_mode: str | None = 
 
     # Dispatch to appropriate parser
     if language == "jvm" or test_mode == "maven":
-        return _analysis_log_maven(log_file)
+        result = _analysis_log_maven(log_file)
     elif language in ["c", "c++"]:
         if test_mode == "googletest":
-            return _analysis_log_googletest(log_file)
+            result = _analysis_log_googletest(log_file)
         elif test_mode == "ctest":
-            return _analysis_log_ctest(log_file)
+            result = _analysis_log_ctest(log_file)
         elif test_mode == "autotools":
-            return _analysis_log_autotools(log_file)
+            result = _analysis_log_autotools(log_file)
         else:
             # Default: try autotools parser for misc/unknown (most common for C)
             logger.info(f"Unknown test_mode '{test_mode}' for C, trying autotools parser")
-            return _analysis_log_autotools(log_file)
+            result = _analysis_log_autotools(log_file)
     else:
         logger.warning(f"Unknown language '{language}', falling back to Maven parser")
-        return _analysis_log_maven(log_file)
+        result = _analysis_log_maven(log_file)
+
+    # Check for [RTS] markers that override framework-specific counts
+    # This handles cases where test.sh operates at finer granularity
+    rts_total, rts_selected, rts_excluded = _parse_rts_markers(log_file)
+    if rts_selected > 0 or rts_total > 0:
+        framework_count = result[0]
+        # Use rts_selected for RTS runs, rts_total for baseline runs
+        if rts_selected > 0:
+            result[0] = rts_selected
+        elif rts_total > 0:
+            result[0] = rts_total
+        logger.info(
+            f"[RTS] markers found: total={rts_total} selected={rts_selected} "
+            f"excluded={rts_excluded} (framework reported {framework_count})"
+        )
+
+    return result
 
 
 def _analysis_log_maven(log_file: Path):
@@ -290,6 +346,9 @@ def _analysis_log_ctest(log_file: Path):
         1: Test timeout computed to be: 9.99988e+06
         1: [test output]
 
+    Note: Standardized [RTS] markers are parsed at the top level in analysis_log()
+    and override the counts returned here. See docs/rts-output-standard.md.
+
     Returns:
         [test_run, total_time, run_tests_list, rts_selected_set, [failure, error, skip]]
     """
@@ -356,13 +415,13 @@ def _analysis_log_ctest(log_file: Path):
     analysis_res[0] = len(run_tests)
     analysis_res[2] = run_tests
 
+    logger.info(f"CTest: {analysis_res[0]} tests, {analysis_res[4][0]} failures, {analysis_res[1]:.2f}s")
+
     # If no summary line was found, use individual counts
     if analysis_res[4][0] == 0 and failed_from_individual > 0:
         analysis_res[4][0] = failed_from_individual
     if analysis_res[4][2] == 0 and skipped_from_individual > 0:
         analysis_res[4][2] = skipped_from_individual
-
-    logger.info(f"CTest: {analysis_res[0]} tests, {analysis_res[4][0]} failures, {analysis_res[1]:.2f}s")
 
     return analysis_res
 
