@@ -9,6 +9,7 @@ from .functions import (
     pull_project_source,
     is_git_repository,
     change_ownership_with_docker,
+    copy_git_repo,
 )
 import logging
 import shutil
@@ -33,7 +34,7 @@ def _copy_oss_fuzz_if_needed(
 
     logger.info(f"Copying OSS-Fuzz from {source_oss_fuzz_dir} to {dest_oss_fuzz_dir}")
     dest_oss_fuzz_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source_oss_fuzz_dir, dest_oss_fuzz_dir)
+    copy_git_repo(source_oss_fuzz_dir, dest_oss_fuzz_dir)
     return True
 
 
