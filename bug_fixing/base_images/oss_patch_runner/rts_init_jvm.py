@@ -784,8 +784,8 @@ def add_excludes_to_surefire(pom_path: str, exclude_patterns: List[str]) -> bool
             group_elem.text = "org.apache.maven.plugins"
             artifact_elem = ET.SubElement(surefire_plugin, "artifactId")
             artifact_elem.text = "maven-surefire-plugin"
-            version_elem = ET.SubElement(surefire_plugin, "version")
-            version_elem.text = SUREFIRE_VERSION
+            # version_elem = ET.SubElement(surefire_plugin, "version")
+            # version_elem.text = SUREFIRE_VERSION
             plugins.append(surefire_plugin)
             print(f"[INFO] Created new surefire plugin for excludes")
 
@@ -888,8 +888,8 @@ def add_includes_to_surefire(pom_path: str, include_patterns: List[str]) -> bool
             group_elem.text = "org.apache.maven.plugins"
             artifact_elem = ET.SubElement(surefire_plugin, "artifactId")
             artifact_elem.text = "maven-surefire-plugin"
-            version_elem = ET.SubElement(surefire_plugin, "version")
-            version_elem.text = SUREFIRE_VERSION
+            # version_elem = ET.SubElement(surefire_plugin, "version")
+            # version_elem.text = SUREFIRE_VERSION
             plugins.append(surefire_plugin)
             print(f"[INFO] Created new surefire plugin for includes")
 
@@ -931,6 +931,88 @@ def add_includes_to_surefire(pom_path: str, include_patterns: List[str]) -> bool
 
     except Exception as e:
         print(f"[ERROR] Failed to add includes to {pom_path}: {e}")
+        return False
+
+
+def add_openclover_dependency_to_pom(pom_path: str) -> bool:
+    """
+    Add OpenClover dependency explicitly to pom.xml's <dependencies> section.
+
+    Some Maven plugins (e.g., jute compiler, code generators) need to have Clover
+    dependency declared explicitly for proper instrumentation. This prevents
+    NoClassDefFoundError: com_atlassian_clover/TestNameSniffer errors.
+
+    See: https://confluence.atlassian.com/cloverkb/noclassdeffounderror-com_atlassian_clover-coveragerecorder-317196439.html
+
+    Args:
+        pom_path: Path to the pom.xml file
+
+    Returns:
+        True if modification succeeded or dependency already exists, False otherwise
+    """
+    ns = "{" + MAVEN_NAMESPACE + "}"
+    openclover_group_id = "org.openclover"
+    openclover_artifact_id = "clover"
+    openclover_version = RTS_TOOLS["openclover"]["version"]
+
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ET.register_namespace("", MAVEN_NAMESPACE)
+
+        # Find or create dependencies element
+        dependencies = root.find(ns + "dependencies")
+        if dependencies is None:
+            dependencies = root.find("dependencies")
+        if dependencies is None:
+            # Create dependencies element before build element
+            dependencies = ET.Element("dependencies")
+            # Insert before <build> if exists, otherwise append
+            build = root.find(ns + "build")
+            if build is None:
+                build = root.find("build")
+            if build is not None:
+                build_idx = list(root).index(build)
+                root.insert(build_idx, dependencies)
+            else:
+                root.append(dependencies)
+            print(f"[INFO] Created <dependencies> element in {pom_path}")
+
+        # Check if OpenClover dependency already exists
+        dep_ns = ns if dependencies.find(ns + "dependency") is not None else ""
+        for dep in dependencies:
+            if dep.tag == dep_ns + "dependency" or dep.tag == "dependency":
+                group_id = dep.find(dep_ns + "groupId")
+                artifact_id = dep.find(dep_ns + "artifactId")
+                if group_id is None:
+                    group_id = dep.find("groupId")
+                if artifact_id is None:
+                    artifact_id = dep.find("artifactId")
+
+                group_text = group_id.text.strip() if group_id is not None and group_id.text else ""
+                artifact_text = artifact_id.text.strip() if artifact_id is not None and artifact_id.text else ""
+
+                # Check for existing clover dependency (OpenClover or Atlassian Clover)
+                if group_text in ("org.openclover", "com.atlassian.clover") and artifact_text == "clover":
+                    print(f"[INFO] Clover dependency already exists in {pom_path}")
+                    return True
+
+        # Add OpenClover dependency
+        dependency = ET.SubElement(dependencies, "dependency")
+        group_elem = ET.SubElement(dependency, "groupId")
+        group_elem.text = openclover_group_id
+        artifact_elem = ET.SubElement(dependency, "artifactId")
+        artifact_elem.text = openclover_artifact_id
+        version_elem = ET.SubElement(dependency, "version")
+        version_elem.text = openclover_version
+
+        tree.write(pom_path, encoding="utf-8", xml_declaration=True)
+        format_xml_with_xmllint(pom_path)
+        print(f"[INFO] Added OpenClover dependency to {pom_path}")
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Failed to add OpenClover dependency to {pom_path}: {e}")
         return False
 
 
@@ -1275,6 +1357,17 @@ def init_rts(
                 print(f"[INFO] Added OpenClover excludes to: {pom_path}")
             else:
                 print(f"[WARNING] Failed to add OpenClover excludes to: {pom_path}")
+
+    # Step 5d: Add OpenClover dependency explicitly to prevent NoClassDefFoundError
+    # Some plugins (e.g., jute compiler) need Clover classes on the classpath
+    # See: https://confluence.atlassian.com/cloverkb/noclassdeffounderror-com_atlassian_clover-coveragerecorder-317196439.html
+    if tool_name == "openclover":
+        print(f"[INFO] Step 5d: Adding OpenClover dependency to pom.xml files...")
+        for pom_path in pom_files:
+            if add_openclover_dependency_to_pom(pom_path):
+                print(f"[INFO] Added OpenClover dependency to: {pom_path}")
+            else:
+                print(f"[WARNING] Failed to add OpenClover dependency to: {pom_path}")
 
     # Step 6: Commit changes to git
     print("[INFO] Step 6: Committing changes to git...")
