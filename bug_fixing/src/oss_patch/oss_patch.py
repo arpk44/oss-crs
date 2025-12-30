@@ -3,7 +3,7 @@ from .crs_builder import OSSPatchCRSBuilder
 from .project_builder import OSSPatchProjectBuilder
 from .crs_runner import OSSPatchCRSRunner
 from .inc_build_checker import IncrementalBuildChecker
-from .globals import OSS_PATCH_WORK_DIR, DEFAULT_PROJECT_SOURCE_PATH
+from .globals import DEFAULT_PROJECT_SOURCE_PATH
 from .functions import (
     prepare_docker_cache_builder,
     pull_project_source,
@@ -39,13 +39,21 @@ def _copy_oss_fuzz_if_needed(
 
 
 class OSSPatch:
-    def __init__(self, project_name: str, crs_name: str | None = None):
+    def __init__(
+        self,
+        project_name: str,
+        crs_name: str | None = None,
+        work_dir: Path | None = None,
+    ):
         self.crs_name = crs_name
         self.project_name = project_name
-        self.work_dir = OSS_PATCH_WORK_DIR / project_name
 
-        if not OSS_PATCH_WORK_DIR.exists():
-            OSS_PATCH_WORK_DIR.mkdir()
+        # Base work directory (default: cwd/.oss-patch-work)
+        self.base_work_dir = work_dir / ".oss-patch-work" if work_dir else Path.cwd() / ".oss-patch-work"
+        self.work_dir = self.base_work_dir / project_name
+
+        if not self.base_work_dir.exists():
+            self.base_work_dir.mkdir(parents=True)
 
         if not self.work_dir.exists():
             self.work_dir.mkdir(parents=True)
@@ -80,7 +88,7 @@ class OSSPatch:
 
         # Copy oss-fuzz to work directory
         source_oss_fuzz = oss_fuzz_path.resolve()
-        dest_oss_fuzz = OSS_PATCH_WORK_DIR / "oss-fuzz"
+        dest_oss_fuzz = self.base_work_dir / "oss-fuzz"
         if not _copy_oss_fuzz_if_needed(dest_oss_fuzz, source_oss_fuzz, overwrite):
             logger.error("Failed to copy OSS-Fuzz")
             return False
