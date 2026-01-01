@@ -433,6 +433,11 @@ uv run oss-bugfix-crs run 42-patch-agent sqlite3 --povs /path/to/povs --harness 
 ```
 
 `/path/to/povs` contains the raw blob files (e.g., `pov_1.bin`, `pov_2.bin`, etc).
+
+**Important**: The filename of each POV file becomes the `pov_id`. For example:
+- Input file `crash_001` → `pov_id: crash_001` → output at `patches/crash_001/patch.diff`
+- Input file `pov_2.bin` → `pov_id: pov_2.bin` → output at `patches/pov_2.bin/patch.diff`
+
 We recommend using the OSS-Fuzz and benchmarks before the final competition (i.e., curl, sqlite, etc in round 3).
 
 
