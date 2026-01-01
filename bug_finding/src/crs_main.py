@@ -177,7 +177,13 @@ def _clone_oss_fuzz_if_needed(
         try:
             # Create parent directory if needed
             oss_fuzz_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(source_oss_fuzz_dir, oss_fuzz_dir)
+            # Copy with symlink handling to avoid errors from dangling symlinks
+            shutil.copytree(
+                source_oss_fuzz_dir,
+                oss_fuzz_dir,
+                symlinks=True,
+                ignore_dangling_symlinks=True,
+            )
             logging.info(f"Successfully copied OSS-Fuzz to {oss_fuzz_dir}")
             return True
         except Exception as e:
