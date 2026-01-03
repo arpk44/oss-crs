@@ -456,7 +456,7 @@ def run_command(command: str, n: int = 5, log_file: Path | None = None) -> None:
 def _build_docker_cache_builder_image() -> bool:
     try:
         run_command(
-            f"docker build --network=host --tag {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} --file {OSS_PATCH_CACHE_BUILDER_DATA_PATH / 'Dockerfile'} {str(Path.cwd())}"
+            f"docker build --tag {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} --file {OSS_PATCH_CACHE_BUILDER_DATA_PATH / 'Dockerfile'} {str(Path.cwd())}"
         )
 
         return True

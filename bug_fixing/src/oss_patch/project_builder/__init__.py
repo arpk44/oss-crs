@@ -505,7 +505,7 @@ class OSSPatchProjectBuilder:
 
         try:
             create_container_command = (
-                f"docker create --privileged --network=host "
+                f"docker create --privileged "
                 f"--env=SANITIZER={sanitizer} "
                 f"--env=CCACHE_DIR=/workspace/ccache "
                 f"--env=FUZZING_LANGUAGE={self.project_lang} "
@@ -698,7 +698,7 @@ class OSSPatchProjectBuilder:
                 env_options += f"--env=RTS_ON=1 --env=RTS_TOOL={rts_tool} "
 
             create_container_command = (
-                f"docker create --privileged --net=host "
+                f"docker create --privileged "
                 f"{env_options}"
                 f"--name={container_name} "
                 f"{volume_mounts}"

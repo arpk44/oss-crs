@@ -307,7 +307,7 @@ class OSSPatchCRSRunner:
                 tmp_proj_src_path = crs_run_tmp_dir / "proj-src"
 
                 command = (
-                    f"docker run --rm --privileged --network=host "
+                    f"docker run --rm --privileged "
                     f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS}:/var/lib/docker "
                     f"-v {tmp_oss_fuzz_path}:/oss-fuzz "
                     f"-v {tmp_proj_src_path}:/cp-sources "
