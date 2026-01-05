@@ -7,3 +7,4 @@ oss-fuzz
 /logs
 .vscode
 .oss-patch
+.oss-patch-work
