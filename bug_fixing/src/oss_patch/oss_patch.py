@@ -343,7 +343,9 @@ class OSSPatch:
         _, effective_rts_mode = resolve_rts_config(False, rts_tool, project_config)
         rts_enabled = effective_rts_mode != "none"
 
-        logger.info(f"Final config: rts_enabled={rts_enabled}, rts_mode={effective_rts_mode}")
+        logger.info(
+            f"Final config: rts_enabled={rts_enabled}, rts_mode={effective_rts_mode}"
+        )
 
         maker = IncrementalSnapshotMaker(
             oss_fuzz_path, self.project_name, self.project_work_dir, log_file=log_file
