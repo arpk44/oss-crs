@@ -352,8 +352,12 @@ class IncrementalSnapshotMaker:
 
             # Push base image if requested
             if push in ("base", "both"):
-                if not force_push and self._check_remote_image_exists(base_target_image):
-                    logger.info(f"Skipping push: base image already exists in remote: {base_target_image}")
+                if not force_push and self._check_remote_image_exists(
+                    base_target_image
+                ):
+                    logger.info(
+                        f"Skipping push: base image already exists in remote: {base_target_image}"
+                    )
                 else:
                     logger.info("Pushing base image...")
                     if not self._push_image(base_image, base_target_image):
@@ -365,7 +369,9 @@ class IncrementalSnapshotMaker:
                 logger.info("Pushing incremental images...")
                 for source_image, target_image in images_to_process:
                     if not force_push and self._check_remote_image_exists(target_image):
-                        logger.info(f"Skipping push: image already exists in remote: {target_image}")
+                        logger.info(
+                            f"Skipping push: image already exists in remote: {target_image}"
+                        )
                         continue
                     if not self._push_image(source_image, target_image):
                         logger.error(f"Failed to push image: {target_image}")

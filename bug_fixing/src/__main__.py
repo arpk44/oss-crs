@@ -345,16 +345,16 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
         choices=["jcgeks", "openclover", "binaryrts"],
         default=None,
         help="RTS tool override. JVM: jcgeks, openclover. C/C++: binaryrts. "
-             "If not specified, uses project.yaml 'rts_mode'. "
-             "If project.yaml has no rts_mode, RTS is disabled.",
+        "If not specified, uses project.yaml 'rts_mode'. "
+        "If project.yaml has no rts_mode, RTS is disabled.",
     )
     make_inc_snapshot_parser.add_argument(
         "--push",
         choices=["base", "inc", "both"],
         default=None,
         help="Push images to Docker registry (ghcr.io/team-atlanta/crsbench/{project}). "
-             "Choices: 'base' (base builder image only), 'inc' (incremental snapshot only), "
-             "'both' (both base and incremental images).",
+        "Choices: 'base' (base builder image only), 'inc' (incremental snapshot only), "
+        "'both' (both base and incremental images).",
     )
     make_inc_snapshot_parser.add_argument(
         "--no-rebuild",
