@@ -231,6 +231,10 @@ class OSSPatchCRSRunner:
 
         target_project_path = copied_oss_fuzz_path / "projects" / self.project_name
 
+        if (target_project_path / ".aixcc").exists():
+            logger.warning(".aixcc directory found. Removing it")
+            shutil.rmtree(target_project_path / ".aixcc")
+
         assert not (target_project_path / ".aixcc").exists()
 
         # @TODO: better way to do this deletions
