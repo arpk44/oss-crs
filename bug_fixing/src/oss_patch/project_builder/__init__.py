@@ -37,6 +37,7 @@ if [[ "$PWD" == *"built-src"* ]]; then
 
     # Now in /src/{proj-src}
     git config --global --add safe.directory $MOUNTED_SRC_DIR 
+    git add -N .
     git diff HEAD > /tmp/patch.diff
 
     popd
