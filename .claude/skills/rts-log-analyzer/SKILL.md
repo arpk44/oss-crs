@@ -28,6 +28,94 @@ Activate this skill when:
 - User mentions `summary.txt` or failed projects
 - User wants to understand why a build or test failed
 
+## Efficient Analysis Tips
+
+### Tip 1: Analyze Bottom-Up (Reverse Order)
+
+The most efficient approach is to **start from the end of the log**:
+
+```bash
+# Step 1: Check final result first
+grep "BUILD FAILURE\|BUILD SUCCESS" *.log
+
+# Step 2: Check for docker start failures
+grep "docker start command has failed" *.log
+```
+
+When `docker start command has failed` appears, the **actual error is 20-30 lines ABOVE it**. Always look up, not down.
+
+### Tip 2: Priority Order for Error Patterns
+
+Search in this order (most common to least):
+
+```bash
+# Priority 1: Test failures (most common)
+grep "<<< FAILURE!\|<<< ERROR!" *.log
+
+# Priority 2: Maven build errors
+grep "\[ERROR\].*Failed to execute goal" *.log
+
+# Priority 3: Clover instrumentation failures
+grep "Clover has failed" *.log
+
+# Priority 4: Missing dependencies/files
+grep "cannot find\|cannot open\|No such file" *.log
+```
+
+### Tip 3: Use Reactor Summary to Find Root Cause
+
+In multi-module Maven builds, the **first FAILURE module is the root cause**. Others are cascading failures.
+
+```
+Apache Kylin - HBase Storage ... FAILURE  <-- ROOT CAUSE
+Apache Kylin - Spark Engine .... SKIPPED  <-- Cascading
+Apache Kylin - Hive Source ..... FAILURE  <-- Cascading
+```
+
+Focus your analysis on the first failed module only.
+
+### Tip 4: Extract Test Failure Details Efficiently
+
+```bash
+# Find failed test with context (error message follows the failure line)
+grep -B2 "<<< ERROR!" *.log
+
+# Extract exception type and message in one command
+grep -A3 "<<< ERROR!" *.log | grep -E "Exception:|Error:|at org\."
+```
+
+### Tip 5: Handle Large Log Files
+
+When log files exceed 10MB (Read tool limit ~256KB):
+
+```bash
+# Use offset to read end of file
+# Read tool with offset parameter
+
+# Or use grep to extract only relevant sections
+grep -n "FAILURE\|ERROR\|Exception" logfile.log
+```
+
+### Tip 6: Common Error Patterns Quick Reference
+
+| Pattern | Root Cause | Quick Fix |
+|---------|------------|-----------|
+| `cannot find.*\.jar` | Build artifact missing | Check build order, run full build |
+| `Clover has failed to instrument` | OpenClover instrumentation error | Fix upstream test failure first |
+| `InaccessibleObjectException` | JDK module access restriction | Add `--add-opens` JVM args |
+| `RatCheckException` | Apache license header missing | Add `-Drat.skip=true` |
+| `Not supported surefire version` | jcgeks requires surefire >= 2.13 | Update surefire version |
+| `请在配置文件config.properties` | jcgeks empty config | Skip RTS for this module |
+
+### Tip 7: Focus on First Error
+
+When multiple errors appear:
+1. **First error is usually the root cause**
+2. Subsequent errors are often cascading failures
+3. Fix the first error, then re-run to see if others resolve
+
+---
+
 ## Analysis Workflow
 
 ### Step 1: Check Summary
@@ -151,6 +239,244 @@ e) **Maven Goal Execution Failure:**
 grep -B20 "docker start command has failed" <logfile> | grep "Failed to execute goal"
 ```
 
+**3.8 For jcgeks RTS No Tests Selected (Empty Affected Classes):**
+
+When jcgeks outputs the Chinese message `请在配置文件config.properties中指定需要处理的jar包或目录列表` (meaning "Please specify the list of jar files or directories to process in config.properties"), this indicates **no tests will be skipped by RTS** because the plugin cannot determine affected classes.
+
+```bash
+# Check for jcgeks empty affected classes message
+grep -l "请在配置文件config.properties中指定需要处理的jar包或目录列表" <logfile>
+
+# Verify by checking for empty Affected Classes output
+grep -A2 "Affected Classes:" <logfile> | grep -E "^\s+\[\]$"
+```
+
+**When this appears, you will see:**
+```
+Agent Mode : JUNIT5EXTENSION -javaagent:/root/.m2/repository/org/jcgeks/org.jcgeks.core/1.0.0/org.jcgeks.core-1.0.0.jar=...
+请在配置文件config.properties中指定需要处理的jar包或目录列表
+Affected Classes:
+  []
+Non Affected Classes:
+  []
+```
+
+**Root Cause:** jcgeks cannot find any jar files or directories to analyze for test selection. This means:
+- No tests will be skipped (all tests run)
+- RTS optimization is not working for this module
+- The project may be a parent POM or missing compiled classes
+
+**Suggested Fix:**
+- Ensure the module has `target/classes` directory with compiled classes
+- Skip RTS for parent/aggregator modules that have no actual code
+
+**3.9 For OpenClover RTS Success Verification:**
+
+When using OpenClover for RTS, verify that test optimization is working correctly by checking these key messages:
+
+```bash
+# Check if OpenClover test optimization is working
+grep "Clover included.*test classes in this run" <logfile>
+grep "Clover estimates having saved" <logfile>
+```
+
+**Key success indicators:**
+
+| Message Pattern | Meaning |
+|-----------------|---------|
+| `Clover included N test classes in this run (total # test classes : M)` where N < M | ✅ RTS is working - some tests were skipped |
+| `Clover estimates having saved around X second on this optimized test run` | ✅ RTS saved time by skipping tests |
+| `Saving snapshot to: .../.clover/clover.snapshot` | ✅ Snapshot saved successfully |
+| `Updating snapshot '...' against Clover database` | ✅ Snapshot updated for next run |
+
+**First run vs subsequent runs:**
+
+On the **first run** (no snapshot exists):
+```
+[INFO] Clover is not optimizing this test run as no test snapshot file was found
+[INFO] Clover included 43 test classes in this run (total # test classes : 43)
+```
+→ All tests run because no snapshot exists yet (expected behavior)
+
+On **subsequent runs** (snapshot exists):
+```
+[INFO] Clover estimates having saved around 1 second on this optimized test run. The full test run takes approx. 3 seconds
+[INFO] Clover included 40 test classes in this run (total # test classes : 43)
+```
+→ RTS is working - only 40 of 43 test classes run based on code changes
+
+**How to verify OpenClover RTS is working:**
+```bash
+# Extract test class counts across all runs
+grep "Clover included.*test classes" <logfile> | while read line; do
+  echo "$line"
+done
+
+# Check if test count decreased after first run
+# First run: N = total (no optimization)
+# Subsequent runs: N < total (optimization active)
+```
+
+**When OpenClover RTS is NOT working:**
+- All runs show `Clover included N test classes (total: N)` with N = total
+- No "estimates having saved" messages after first run
+- Snapshot file not being created/updated
+
+**3.10 Distinguishing RTS Behavior: "No Skip Possible" vs "Skip Success"**
+
+When analyzing RTS logs, you may encounter two cases where the test count doesn't decrease. Use these patterns to distinguish them:
+
+---
+
+**Case 1: Tests Cannot Be Skipped (Too Few Tests)**
+
+Example: `htmlunit` - only 1 test class exists
+
+**Characteristics:**
+- Baseline tests = RTS tests (same count)
+- `Clover was unable to save any time` message appears
+- Only 1 test class exists in total
+
+**Verification commands:**
+```bash
+# 1. Compare baseline vs RTS test counts
+grep "Baseline tests run:" <log>
+grep "Tests run (cpv" <log>
+
+# 2. Check for Clover optimization failure message
+grep "Clover was unable to save any time" <log>
+
+# 3. Check total test class count
+grep "total # test classes" <log>
+```
+
+**Log example:**
+```
+Baseline tests run: 24
+Tests run (cpv_0): 24        # Same = no skip
+Clover was unable to save any time on this optimized test run.
+Clover included 1 test class in this run (total # test classes : 1)
+WARNING: RTS did not reduce test count - same as baseline!
+```
+
+**Interpretation:** RTS is working correctly, but there's only 1 test class, so nothing can be skipped. This is **expected behavior**, not an error.
+
+---
+
+**Case 2: RTS Successfully Skipped Tests**
+
+Example: `olingo` - 51 test classes, all skipped
+
+**Characteristics:**
+- Baseline tests > RTS tests (count decreased)
+- `No tests to run` message appears
+- Multiple test classes exist but most/all are skipped
+
+**Verification commands:**
+```bash
+# 1. Compare baseline vs RTS test counts
+grep "Baseline tests run:" <log>
+grep "Tests run (cpv" <log>
+
+# 2. Check for "no tests" message
+grep "No tests to run" <log>
+
+# 3. Check Clover included test class counts
+grep "Clover included.*test class" <log>
+```
+
+**Log example:**
+```
+Baseline tests run: 288
+Tests run (cpv_0): 0         # Decreased = skip occurred!
+No tests to run.
+Clover included 0 test classes in this run (total # test classes : 27)
+WARNING: RTS selected 0 tests - all tests were skipped!
+```
+
+**Interpretation:** RTS determined that the patch doesn't affect any tests, so all were skipped. This is a **successful optimization**.
+
+---
+
+**Quick Differentiation Checklist:**
+
+| Check Item | Case 1 (Cannot Skip) | Case 2 (Skip Success) |
+|------------|---------------------|----------------------|
+| `Baseline tests run` vs `Tests run (cpv)` | Same | Decreased |
+| `Clover was unable to save any time` | Present | Absent |
+| `No tests to run` | Absent | Present |
+| `total # test classes` | 1 | Multiple |
+| `WARNING: RTS did not reduce test count` | Present | Absent |
+| `WARNING: RTS selected 0 tests` | Absent | Present (normal) |
+
+**One-liner command for quick judgment:**
+```bash
+# Compare test counts (key indicator!)
+grep -E "Baseline tests run:|Tests run \(cpv" <log> | tail -4
+
+# Interpretation:
+# - Same numbers → Case 1 (too few tests originally)
+# - Decreased numbers → Case 2 (RTS skip successful)
+```
+
+---
+
+**Case 3: OpenClover Instrumentation Failure (False Skip)**
+
+Example: `olingo` - Clover claims to select tests but none run
+
+**Characteristics:**
+- Baseline tests > 0, but RTS tests = 0
+- `No Clover instrumentation done on source files` message appears
+- Clover reports "included N test classes" but actual `Tests run: 0`
+
+**Verification commands:**
+```bash
+# 1. Check for instrumentation failure
+grep "No Clover instrumentation done" <log>
+
+# 2. Check discrepancy between Clover selection and actual execution
+grep "Clover included.*test class" <log>
+grep "Tests run: 0" <log>
+
+# 3. Verify test file pattern matching
+grep "no matching sources files found" <log>
+```
+
+**Log example:**
+```
+Clover all over. Instrumented 1 file (1 package).
+No Clover instrumentation done on source files in: [.../src/test/java] as no matching sources files found
+Clover included 1 test class in this run (total # test classes : 25)
+...
+Tests run: 0, Failures: 0, Errors: 0, Skipped: 0
+```
+
+**Interpretation:** This is **NOT** a successful RTS skip! OpenClover failed to instrument test files, so tests cannot run at all. This is a **configuration error**.
+
+**Root Cause:** Test source files don't match Clover's expected patterns, or the test directory structure is non-standard.
+
+**Suggested Fix:**
+- Check if test files follow standard naming: `*Test.java`, `Test*.java`, `*TestCase.java`
+- Verify test source directory is correctly configured in pom.xml
+- Add explicit test file patterns to Clover plugin configuration
+
+---
+
+**Complete Differentiation Table (3 Cases):**
+
+| Check Item | Case 1 (Cannot Skip) | Case 2 (Skip Success) | Case 3 (Instrumentation Fail) |
+|------------|---------------------|----------------------|------------------------------|
+| Baseline tests | N | M (M > 0) | M (M > 0) |
+| RTS tests | N (same) | 0 or < M | **0** |
+| `No Clover instrumentation done` | Absent | Absent | **Present** |
+| `Clover was unable to save any time` | Present | Absent | Absent |
+| `No tests to run` | Absent | Present | May be absent |
+| `Clover included N test classes` | N = total | N < total | N > 0 but tests = 0 |
+| Actual issue | Normal (few tests) | Normal (optimization) | **Bug/Config error** |
+
+---
+
 ### Step 4: Identify Specific Error Patterns
 
 | Pattern to Search | Error Type | Detailed Cause |
@@ -170,6 +496,8 @@ grep -B20 "docker start command has failed" <logfile> | grep "Failed to execute 
 | `PluginContainerException` | Plugin Error | Maven plugin initialization failed |
 | `realm =.*plugin>` | Plugin Classloader | Plugin classloader conflict |
 | `docker start command has failed` | Docker Error | **MUST look above for actual cause** |
+| `请在配置文件config.properties中指定需要处理的jar包或目录列表` | jcgeks Empty Config | No jar/directories configured, RTS will not skip tests |
+| `Affected Classes:.*\[\]` + `Non Affected Classes:.*\[\]` | jcgeks No Analysis | Empty affected classes, no test selection possible |
 
 ### Step 5: Output Format (MUST BE DETAILED)
 
@@ -344,6 +672,10 @@ Create descriptive error categories based on the actual error found. Categories 
 - `MODULE_ACCESS_ERROR` - JDK module access issues (Java)
 - `LICENSE_CHECK_FAILURE` - License validation failure (Java)
 - `PLUGIN_ERROR` - Build plugin errors (Java)
+- `JCGEKS_EMPTY_CONFIG` - jcgeks RTS plugin found no jar/directories to analyze (Java)
+- `OPENCLOVER_RTS_SUCCESS` - OpenClover RTS working correctly, tests skipped (Java)
+- `OPENCLOVER_RTS_NO_SNAPSHOT` - OpenClover first run, no snapshot yet (Java)
+- `OPENCLOVER_RTS_NO_OPTIMIZATION` - OpenClover not skipping tests despite snapshot (Java)
 
 **DO NOT use overly generic categories like:**
 - `ERROR` - Too vague
