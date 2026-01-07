@@ -132,9 +132,15 @@ def _save_parent_image_tarballs(
     tarball_path = parent_images_dir / f"{project_name}.tar"
 
     # Save parent image to tarball if not already exists
-    if tarball_path.exists():
+    if tarball_path.exists() and tarball_path.is_file():
         logger.info(f"Parent image tarball already exists: {tarball_path}")
     else:
+        # Remove if it exists as a directory (docker-compose creates directory on failed mounts)
+        if tarball_path.exists() and tarball_path.is_dir():
+            import shutil
+            shutil.rmtree(tarball_path)
+        # Create parent directories if needed (project_name may contain slashes)
+        tarball_path.parent.mkdir(parents=True, exist_ok=True)
         logger.info(f"Saving parent image {parent_image} to {tarball_path}")
         save_cmd = ["docker", "save", parent_image, "-o", str(tarball_path)]
         try:
