@@ -1147,6 +1147,132 @@ def has_existing_clover(root: ET.Element, ns: str) -> bool:
     return False
 
 
+def add_openclover_to_plugin_management(pom_path: str) -> bool:
+    """
+    Add OpenClover plugin to pluginManagement section and disable Atlassian Clover.
+
+    Some parent POMs (e.g., jboss-parent) define com.atlassian.maven.plugins:clover-maven-plugin
+    with an older version (4.1.2). This function:
+    1. Adds org.openclover:clover-maven-plugin to pluginManagement
+    2. Disables com.atlassian.maven.plugins:clover-maven-plugin with <skip>true</skip>
+
+    This prevents version conflicts where Atlassian Clover 4.1.2 runtime tries to
+    compile code instrumented by OpenClover 4.5.2.
+
+    Args:
+        pom_path: Path to the pom.xml file
+
+    Returns:
+        True if modification succeeded, False otherwise
+    """
+    ns = "{" + MAVEN_NAMESPACE + "}"
+    openclover_config = RTS_TOOLS["openclover"]
+
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ET.register_namespace("", MAVEN_NAMESPACE)
+
+        # Find or create build element
+        build = root.find(ns + "build")
+        if build is None:
+            build = root.find("build")
+        if build is None:
+            build = ET.SubElement(root, "build")
+
+        # Find or create pluginManagement element
+        plugin_management = build.find(ns + "pluginManagement")
+        if plugin_management is None:
+            plugin_management = build.find("pluginManagement")
+        if plugin_management is None:
+            plugin_management = ET.SubElement(build, "pluginManagement")
+
+        # Find or create plugins element inside pluginManagement
+        pm_plugins = plugin_management.find(ns + "plugins")
+        if pm_plugins is None:
+            pm_plugins = plugin_management.find("plugins")
+        if pm_plugins is None:
+            pm_plugins = ET.SubElement(plugin_management, "plugins")
+
+        # Determine namespace used
+        plugin_ns = ns if pm_plugins.find(ns + "plugin") is not None else ""
+
+        # Find existing clover plugins by groupId
+        openclover_plugin = None
+        atlassian_clover_plugin = None
+        for plugin in pm_plugins:
+            if plugin.tag == plugin_ns + "plugin" or plugin.tag == "plugin":
+                artifact_id = plugin.find(plugin_ns + "artifactId")
+                if artifact_id is None:
+                    artifact_id = plugin.find("artifactId")
+                group_id = plugin.find(plugin_ns + "groupId")
+                if group_id is None:
+                    group_id = plugin.find("groupId")
+
+                if artifact_id is not None and artifact_id.text == "clover-maven-plugin":
+                    group_text = group_id.text if group_id is not None else ""
+                    if group_text == "org.openclover":
+                        openclover_plugin = plugin
+                    elif group_text == "com.atlassian.maven.plugins":
+                        atlassian_clover_plugin = plugin
+
+        # 1. Add or update OpenClover plugin
+        if openclover_plugin is not None:
+            # Update existing OpenClover plugin version
+            version = openclover_plugin.find(plugin_ns + "version")
+            if version is None:
+                version = openclover_plugin.find("version")
+            if version is None:
+                version = ET.SubElement(openclover_plugin, "version")
+            version.text = openclover_config["version"]
+            print(f"[INFO] Updated OpenClover to {openclover_config['version']}")
+        else:
+            # Add new OpenClover plugin
+            new_plugin = ET.SubElement(pm_plugins, "plugin")
+            group_elem = ET.SubElement(new_plugin, "groupId")
+            group_elem.text = openclover_config["group_id"]
+            artifact_elem = ET.SubElement(new_plugin, "artifactId")
+            artifact_elem.text = openclover_config["artifact_id"]
+            version_elem = ET.SubElement(new_plugin, "version")
+            version_elem.text = openclover_config["version"]
+            print(f"[INFO] Added OpenClover {openclover_config['version']} to pluginManagement")
+
+        # 2. Disable Atlassian Clover plugin (to prevent version conflicts)
+        if atlassian_clover_plugin is not None:
+            # Add <skip>true</skip> to existing Atlassian Clover plugin
+            config = atlassian_clover_plugin.find(plugin_ns + "configuration")
+            if config is None:
+                config = atlassian_clover_plugin.find("configuration")
+            if config is None:
+                config = ET.SubElement(atlassian_clover_plugin, "configuration")
+            skip = config.find(plugin_ns + "skip")
+            if skip is None:
+                skip = config.find("skip")
+            if skip is None:
+                skip = ET.SubElement(config, "skip")
+            skip.text = "true"
+            print("[INFO] Disabled existing Atlassian Clover plugin with <skip>true</skip>")
+        else:
+            # Add Atlassian Clover plugin with skip=true to override parent POM
+            atlassian_plugin = ET.SubElement(pm_plugins, "plugin")
+            group_elem = ET.SubElement(atlassian_plugin, "groupId")
+            group_elem.text = "com.atlassian.maven.plugins"
+            artifact_elem = ET.SubElement(atlassian_plugin, "artifactId")
+            artifact_elem.text = "clover-maven-plugin"
+            config = ET.SubElement(atlassian_plugin, "configuration")
+            skip = ET.SubElement(config, "skip")
+            skip.text = "true"
+            print("[INFO] Added Atlassian Clover plugin with <skip>true</skip> to disable parent POM's clover")
+
+        tree.write(pom_path, encoding="utf-8", xml_declaration=True)
+        format_xml_with_xmllint(pom_path)
+        return True
+
+    except Exception as e:
+        print(f"[ERROR] Failed to add OpenClover to pluginManagement in {pom_path}: {e}")
+        return False
+
+
 def add_rts_plugins_to_pom(pom_path: str, project_name: str, tool_name: str) -> bool:
     """Add RTS tool plugin and configure surefire excludesFile in a pom.xml file."""
     ns = "{" + MAVEN_NAMESPACE + "}"
@@ -1389,6 +1515,17 @@ def init_rts(
         if not install_ekstazi_jars():
             print("[ERROR] Failed to install Ekstazi dependencies")
             return False
+
+    # Step 2b: Override parent POM's clover-maven-plugin version in pluginManagement
+    # Some parent POMs (e.g., jboss-parent) define com.atlassian.maven.plugins:clover-maven-plugin
+    # with an older version, causing version conflicts with OpenClover runtime
+    if tool_name == "openclover":
+        print(f"[INFO] Step 2b: Adding OpenClover to pluginManagement to override parent POM versions...")
+        for pom_path in pom_files:
+            if add_openclover_to_plugin_management(pom_path):
+                print(f"[INFO] Added OpenClover to pluginManagement: {pom_path}")
+            else:
+                print(f"[WARNING] Failed to add OpenClover to pluginManagement: {pom_path}")
 
     # Step 3: Add RTS plugins to all pom.xml files
     print("[INFO] Step 3: Adding RTS plugins to pom.xml files...")
