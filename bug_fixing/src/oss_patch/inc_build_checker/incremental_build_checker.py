@@ -157,13 +157,17 @@ class IncrementalBuildChecker:
         proj_src_path = self.work_dir / "project-src"
 
         if skip_clone:
-            logger.info(
-                f"Skipping source code clone, using existing code at {proj_src_path}"
-            )
             if not proj_src_path.exists():
-                logger.error(f"Source code path does not exist: {proj_src_path}")
-                return False
-        else:
+                logger.warning(
+                    f"Source code path does not exist: {proj_src_path}, cloning anyway..."
+                )
+                skip_clone = False
+            else:
+                logger.info(
+                    f"Skipping source code clone, using existing code at {proj_src_path}"
+                )
+
+        if not skip_clone:
             logger.info(f"Preparing project source code for {self.project_name}")
             if proj_src_path.exists():
                 change_ownership_with_docker(proj_src_path)
@@ -267,13 +271,17 @@ class IncrementalBuildChecker:
         proj_src_path = self.work_dir / "project-src"
 
         if skip_clone:
-            logger.info(
-                f"Skipping source code clone, using existing code at {proj_src_path}"
-            )
             if not proj_src_path.exists():
-                logger.error(f"Source code path does not exist: {proj_src_path}")
-                return False
-        else:
+                logger.warning(
+                    f"Source code path does not exist: {proj_src_path}, cloning anyway..."
+                )
+                skip_clone = False
+            else:
+                logger.info(
+                    f"Skipping source code clone, using existing code at {proj_src_path}"
+                )
+
+        if not skip_clone:
             logger.info(f"Preparing project source code for {self.project_name}")
             if proj_src_path.exists():
                 change_ownership_with_docker(proj_src_path)
