@@ -210,6 +210,8 @@ class OSSPatch:
         hints_dir: Path | None,
         out_dir: Path,
         log_dir: Path | None = None,
+        cpuset: str | None = None,
+        memory: str | None = None,
     ) -> bool:
         assert self.crs_name
 
@@ -217,7 +219,12 @@ class OSSPatch:
         effective_log_dir = log_dir if log_dir else out_dir / "logs"
 
         oss_patch_runner = OSSPatchCRSRunner(
-            self.project_name, self.project_work_dir, out_dir, log_dir=effective_log_dir
+            self.project_name,
+            self.project_work_dir,
+            out_dir,
+            log_dir=effective_log_dir,
+            cpuset=cpuset,
+            memory=memory,
         )
 
         return oss_patch_runner.run_crs_against_povs(

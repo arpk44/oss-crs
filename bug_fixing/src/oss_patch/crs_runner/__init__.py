@@ -106,6 +106,8 @@ class OSSPatchCRSRunner:
         work_dir: Path,
         out_dir: Path | None = None,
         log_dir: Path | None = None,
+        cpuset: str | None = None,
+        memory: str | None = None,
     ):
         self.project_name = project_name
         self.work_dir = work_dir
@@ -115,6 +117,8 @@ class OSSPatchCRSRunner:
 
         self.out_dir = out_dir
         self.log_dir = log_dir
+        self.cpuset = cpuset
+        self.memory = memory
 
         if out_dir and not out_dir.exists():
             out_dir.mkdir()
@@ -372,8 +376,15 @@ class OSSPatchCRSRunner:
                 tmp_oss_fuzz_path = crs_run_tmp_dir / "oss-fuzz"
                 tmp_proj_src_path = crs_run_tmp_dir / "proj-src"
 
+                resource_flags = ""
+                if self.cpuset:
+                    resource_flags += f"--cpuset-cpus={self.cpuset} "
+                if self.memory:
+                    resource_flags += f"--memory={self.memory} "
+
                 command = (
                     f"docker run --rm --privileged "
+                    f"{resource_flags}"
                     f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME}:/var/lib/docker "
                     f"-v {tmp_oss_fuzz_path}:/oss-fuzz "
                     f"-v {tmp_proj_src_path}:/cp-sources "

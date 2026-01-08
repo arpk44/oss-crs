@@ -104,6 +104,8 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
             _get_path_or_none(args.hints),
             Path(args.out),
             log_dir=log_dir,
+            cpuset=args.cpuset,
+            memory=args.memory,
         )
         # FIXME: Bandaid solution for permission issues when runner executes as root
         change_ownership_with_docker(Path(args.out))
@@ -266,6 +268,16 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
         "--log-dir",
         default=None,
         help="Directory to save CRS execution logs. Default: {out}/logs/",
+    )
+    run_crs_parser.add_argument(
+        "--cpuset",
+        default=None,
+        help="CPU cores to pin the CRS container to (e.g., '0-3' or '0,2,4,6'). Maps to docker --cpuset-cpus.",
+    )
+    run_crs_parser.add_argument(
+        "--memory",
+        default=None,
+        help="Memory limit for the CRS container (e.g., '4G' or '512M'). Maps to docker --memory.",
     )
 
     run_pov_parser = subparsers.add_parser(
