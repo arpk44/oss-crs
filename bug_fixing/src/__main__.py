@@ -6,7 +6,7 @@ from pathlib import Path
 from datetime import datetime
 from .oss_patch import OSSPatch
 from .oss_patch.functions import change_ownership_with_docker
-
+from .oss_patch.globals import DEFAULT_OSS_FUZZ_PATH
 
 logger = logging.getLogger(__name__)
 LOG_FILE_HANDLER = None
@@ -183,7 +183,7 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
     #                               nargs='?')
     build_crs_parser.add_argument("--local-crs", help="path to local CRS source code")
     build_crs_parser.add_argument(
-        "--oss-fuzz", required=True, help="path to OSS-Fuzz repository"
+        "--oss-fuzz", help="path to OSS-Fuzz repository", default=DEFAULT_OSS_FUZZ_PATH
     )
     build_crs_parser.add_argument(
         "--project-path",
@@ -300,7 +300,9 @@ def _get_parser():  # pylint: disable=too-many-statements,too-many-locals
     #     dest="manage_command", required=True, help="Subcommand for testing incremental build."
     # )
     test_inc_build_parser.add_argument("project", help="name of the project")
-    test_inc_build_parser.add_argument("oss_fuzz", help="path to OSS-Fuzz")
+    test_inc_build_parser.add_argument(
+        "oss_fuzz", help="path to OSS-Fuzz", default=DEFAULT_OSS_FUZZ_PATH
+    )
     test_inc_build_parser.add_argument(
         "--source-path",
         help="Path to pre-cloned source code directory "
