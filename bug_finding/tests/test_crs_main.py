@@ -139,9 +139,9 @@ class TestCloneOssFuzzSelectiveBuildCopy:
         self, temp_oss_fuzz_source: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify target project's build artifacts are copied."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -158,9 +158,9 @@ class TestCloneOssFuzzSelectiveBuildCopy:
         self, temp_oss_fuzz_source: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify other projects' build artifacts are NOT copied."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -180,9 +180,9 @@ class TestCloneOssFuzzCopiesOnlyTargetProject:
         self, temp_oss_fuzz_source: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify only the target project is copied, not other projects."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -203,9 +203,9 @@ class TestCloneOssFuzzCopiesInfraAndRootFiles:
         self, temp_oss_fuzz_source: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify infra/ directory and root files are copied."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -226,10 +226,10 @@ class TestRsyncNotAvailableError:
         self, temp_oss_fuzz_source: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify clear error message when rsync is not installed."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         with patch("bug_finding.src.utils.shutil.which", return_value=None):
-            result = _clone_oss_fuzz_if_needed(
+            result = clone_oss_fuzz_if_needed(
                 oss_fuzz_dir=temp_oss_fuzz_dest,
                 source_oss_fuzz_dir=temp_oss_fuzz_source,
                 project_name="json-c",
@@ -249,9 +249,9 @@ class TestCloneOssFuzzNestedProjectName:
         self, temp_oss_fuzz_source: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify nested project paths like aixcc/c/myproject are handled."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="aixcc/c/myproject",
@@ -274,9 +274,9 @@ class TestCloneOssFuzzSymlinkHandling:
         self, source_with_symlinks: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify valid symlinks are preserved during copy."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=source_with_symlinks,
             project_name="json-c",
@@ -291,7 +291,7 @@ class TestCloneOssFuzzSymlinkHandling:
         self, source_with_symlinks: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify dangling symlinks don't cause errors."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         # Verify source has dangling symlink
         dangling = source_with_symlinks / "dangling_link"
@@ -299,7 +299,7 @@ class TestCloneOssFuzzSymlinkHandling:
         assert not dangling.exists()  # Target doesn't exist
 
         # Copy should complete without error
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=source_with_symlinks,
             project_name="json-c",
@@ -320,9 +320,9 @@ class TestCloneOssFuzzEdgeCases:
         self, temp_oss_fuzz_source: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify clear error when target project doesn't exist (FR-006)."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="nonexistent-project",
@@ -334,14 +334,14 @@ class TestCloneOssFuzzEdgeCases:
         self, tmp_path: Path, temp_oss_fuzz_dest: Path
     ):
         """Verify error when source has no projects/ directory."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         # Create invalid OSS-Fuzz structure (no projects/ dir)
         invalid_source = tmp_path / "invalid_oss_fuzz"
         invalid_source.mkdir()
         (invalid_source / "README.md").write_text("Invalid")
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=temp_oss_fuzz_dest,
             source_oss_fuzz_dir=invalid_source,
             project_name="json-c",
@@ -361,11 +361,11 @@ class TestMultiProjectIsolation:
         self, temp_oss_fuzz_source: Path, tmp_path: Path
     ):
         """Verify multiple projects can be copied to isolated directories."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         # Copy json-c to its own directory
         dest_json_c = tmp_path / "crs" / "oss-fuzz" / "json-c"
-        result1 = _clone_oss_fuzz_if_needed(
+        result1 = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=dest_json_c,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -374,7 +374,7 @@ class TestMultiProjectIsolation:
 
         # Copy libxml2 to its own directory
         dest_libxml2 = tmp_path / "crs" / "oss-fuzz" / "libxml2"
-        result2 = _clone_oss_fuzz_if_needed(
+        result2 = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=dest_libxml2,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="libxml2",
@@ -396,12 +396,12 @@ class TestMultiProjectIsolation:
         self, temp_oss_fuzz_source: Path, tmp_path: Path
     ):
         """Verify copying to existing directory works (rsync overwrites)."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "crs" / "oss-fuzz" / "json-c"
 
         # First copy
-        result1 = _clone_oss_fuzz_if_needed(
+        result1 = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -413,7 +413,7 @@ class TestMultiProjectIsolation:
         marker_file.write_text("modified")
 
         # Second copy should work (rsync handles existing directories)
-        result2 = _clone_oss_fuzz_if_needed(
+        result2 = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -431,7 +431,7 @@ class TestSparseCheckout:
 
     def test_sparse_checkout_with_project_name(self, tmp_path: Path):
         """Verify sparse checkout is used when project_name is provided."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "sparse_clone"
         git_calls = []
@@ -443,8 +443,8 @@ class TestSparseCheckout:
                 dest.mkdir(parents=True, exist_ok=True)
             return None
 
-        with patch("bug_finding.src.crs_main.run_git", side_effect=mock_run_git):
-            result = _clone_oss_fuzz_if_needed(
+        with patch("bug_finding.src.crs_utils.run_git", side_effect=mock_run_git):
+            result = clone_oss_fuzz_if_needed(
                 oss_fuzz_dir=dest,
                 source_oss_fuzz_dir=None,  # No source = git clone
                 project_name="json-c",
@@ -479,7 +479,7 @@ class TestSparseCheckout:
 
     def test_full_clone_without_project_name(self, tmp_path: Path):
         """Verify full shallow clone is used when no project_name."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "full_clone"
         git_calls = []
@@ -489,8 +489,8 @@ class TestSparseCheckout:
             dest.mkdir(parents=True, exist_ok=True)
             return None
 
-        with patch("bug_finding.src.crs_main.run_git", side_effect=mock_run_git):
-            result = _clone_oss_fuzz_if_needed(
+        with patch("bug_finding.src.crs_utils.run_git", side_effect=mock_run_git):
+            result = clone_oss_fuzz_if_needed(
                 oss_fuzz_dir=dest,
                 source_oss_fuzz_dir=None,
                 project_name=None,  # No project = full clone
@@ -508,7 +508,7 @@ class TestSparseCheckout:
 
     def test_skip_clone_if_valid_directory_exists(self, tmp_path: Path):
         """Verify clone is skipped if directory already exists with valid structure."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "existing_clone"
         dest.mkdir(parents=True)
@@ -523,8 +523,8 @@ class TestSparseCheckout:
             git_calls.append((args, kwargs))
             return None
 
-        with patch("bug_finding.src.crs_main.run_git", side_effect=mock_run_git):
-            result = _clone_oss_fuzz_if_needed(
+        with patch("bug_finding.src.crs_utils.run_git", side_effect=mock_run_git):
+            result = clone_oss_fuzz_if_needed(
                 oss_fuzz_dir=dest,
                 source_oss_fuzz_dir=None,
                 project_name="json-c",
@@ -536,7 +536,7 @@ class TestSparseCheckout:
 
     def test_reclone_if_invalid_directory_exists(self, tmp_path: Path):
         """Verify clone happens if directory exists but is invalid."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "invalid_clone"
         dest.mkdir(parents=True)
@@ -553,8 +553,8 @@ class TestSparseCheckout:
                 dest.mkdir(parents=True, exist_ok=True)
             return None
 
-        with patch("bug_finding.src.crs_main.run_git", side_effect=mock_run_git):
-            result = _clone_oss_fuzz_if_needed(
+        with patch("bug_finding.src.crs_utils.run_git", side_effect=mock_run_git):
+            result = clone_oss_fuzz_if_needed(
                 oss_fuzz_dir=dest,
                 source_oss_fuzz_dir=None,
                 project_name="json-c",
@@ -576,11 +576,11 @@ class TestCopySizeValidation:
         self, temp_oss_fuzz_source: Path, tmp_path: Path
     ):
         """Verify rsync copy is smaller than full source."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "crs" / "oss-fuzz" / "json-c"
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -605,11 +605,11 @@ class TestCopySizeValidation:
         self, temp_oss_fuzz_source: Path, tmp_path: Path
     ):
         """Verify rsync copy is under 50MB threshold."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "crs" / "oss-fuzz" / "json-c"
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=dest,
             source_oss_fuzz_dir=temp_oss_fuzz_source,
             project_name="json-c",
@@ -644,11 +644,11 @@ class TestSparseCheckoutSizeValidation:
 
     def test_sparse_checkout_under_size_limit(self, tmp_path: Path):
         """Verify sparse checkout is under 50MB threshold."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "crs" / "oss-fuzz" / "json-c"
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=dest,
             source_oss_fuzz_dir=None,  # No source = git clone
             project_name="json-c",
@@ -676,11 +676,11 @@ class TestSparseCheckoutSizeValidation:
 
     def test_sparse_checkout_excludes_other_projects(self, tmp_path: Path):
         """Verify sparse checkout only includes target project."""
-        from bug_finding.src.crs_main import _clone_oss_fuzz_if_needed
+        from bug_finding.src.crs_utils import clone_oss_fuzz_if_needed
 
         dest = tmp_path / "crs" / "oss-fuzz" / "json-c"
 
-        result = _clone_oss_fuzz_if_needed(
+        result = clone_oss_fuzz_if_needed(
             oss_fuzz_dir=dest,
             source_oss_fuzz_dir=None,
             project_name="json-c",
