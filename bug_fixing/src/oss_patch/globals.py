@@ -25,3 +25,6 @@ OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME = "images-for-crs-volume"
 DEFAULT_DOCKER_ROOT_DIR = "/var/lib/docker"
 OSS_FUZZ_BASE_RUNNER_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
 DEFAULT_PROJECT_SOURCE_NAME = "project-src"
+DEFAULT_INC_BUILD_REGISTRY = "ghcr.io/team-atlanta/crsbench"
+# @TODO: Use git submodule after making the repo "https://github.com/Team-Atlanta/oss-fuzz" public
+DEFAULT_OSS_FUZZ_PATH = Path(_PACKAGE_ROOT).parent / ".oss-fuzz"

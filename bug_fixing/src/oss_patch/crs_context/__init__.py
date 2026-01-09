@@ -18,7 +18,10 @@ from bug_fixing.src.oss_patch.functions import (
     get_crs_image_name,
     change_ownership_with_docker,
     copy_git_repo,
+    pull_project_source,
+    is_git_repository
 )
+from bug_fixing.src.oss_patch.project_builder import OSSPatchProjectBuilder
 from bug_fixing.src.oss_patch.globals import (
     OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME,
     DEFAULT_DOCKER_ROOT_DIR,
@@ -65,23 +68,23 @@ def _disable_force_build_in_oss_fuzz(oss_fuzz_path: Path):
 
 
 def _remove_all_projects_in_oss_fuzz(
-    oss_fuzz_path: Path, except_project: Path | None = None
+    oss_fuzz_path: Path, except_project: str | None = None
 ):
     if except_project:
-        assert except_project.resolve().exists()
-        assert except_project.relative_to(oss_fuzz_path)
+        except_project_path = oss_fuzz_path / "projects" / except_project
+        assert except_project_path.exists()
 
         # @TODO: better way to do this deletions
         with TemporaryDirectory() as tmp_dir:
             tmp_dir_path = Path(tmp_dir)
             tmp_project_path = tmp_dir_path / "target-project"
 
-            shutil.copytree(except_project, tmp_project_path)
+            shutil.copytree(except_project_path, tmp_project_path)
 
             shutil.rmtree(oss_fuzz_path / "projects")
 
-            Path.mkdir(except_project.parent, parents=True)
-            shutil.move(tmp_project_path, except_project)
+            Path.mkdir(except_project_path.parent, parents=True)
+            shutil.move(tmp_project_path, except_project_path)
 
         assert len([d for d in (oss_fuzz_path / "projects").iterdir()]) == 1
 
@@ -99,7 +102,7 @@ def _check_force_build_in_oss_fuzz(oss_fuzz_path: Path) -> bool:
     return True
 
 
-class OSSPatchCRSRunner:
+class OSSPatchCRSContext:
     def __init__(
         self,
         project_name: str,
@@ -113,6 +116,7 @@ class OSSPatchCRSRunner:
         self.work_dir = work_dir
         self.run_context_dir = self.work_dir / "run_context"
         self.oss_fuzz_path = self.run_context_dir / "oss-fuzz"
+        self.project_path = self.oss_fuzz_path / "projects" / self.project_name
         self.proj_src_path = self.run_context_dir / "proj-src"
 
         self.out_dir = out_dir
@@ -139,20 +143,45 @@ class OSSPatchCRSRunner:
         with open(self.run_context_dir / "config.yaml", "w") as f:
             f.write(yaml.safe_dump(config_yaml, sort_keys=False))
 
-    def _construct_run_context(self, oss_fuzz_path: Path, source_path: Path) -> bool:
+    def _construct_run_context(
+        self,
+        oss_fuzz_path: Path,
+        custom_project_path: Path | None = None,
+        custom_source_path: Path | None = None,
+    ) -> bool:
         if self.run_context_dir.exists():
+            logger.info(
+                f'Cleaning up existing run context directory: "{self.run_context_dir}"'
+            )
             change_ownership_with_docker(self.run_context_dir)
             shutil.rmtree(self.run_context_dir)
+
         self.run_context_dir.mkdir()
 
-        if not self._copy_oss_fuzz_and_sources(
-            oss_fuzz_path, source_path, self.run_context_dir
-        ):
-            return False
+        shutil.copytree(oss_fuzz_path, self.oss_fuzz_path)
+
+        # Copy the custom-provided project
+        if custom_project_path:
+            if self.project_path.exists():
+                shutil.rmtree(self.project_path)
+            shutil.copytree(custom_project_path, self.project_path)
+
+        _remove_all_projects_in_oss_fuzz(self.oss_fuzz_path, self.project_name)
+
+        assert self.project_path.exists()
+
+        if custom_source_path:
+            logger.info(f'Using the provided project source: "{custom_source_path}"')
+            shutil.copytree(custom_source_path, self.proj_src_path)
+        else:
+            pull_project_source(self.project_path, self.proj_src_path)
 
         _disable_force_build_in_oss_fuzz(self.oss_fuzz_path)
 
         self._write_runner_metadata()
+
+        assert self.project_path.exists()
+        assert self.proj_src_path.exists()
 
         return True
 
@@ -194,13 +223,35 @@ class OSSPatchCRSRunner:
     def build(
         self,
         oss_fuzz_path: Path,
-        source_path: Path,
+        custom_project_path: Path | None = None,
+        custom_source_path: Path | None = None,
+        force_rebuild: bool = False,
+        inc_build_enabled: bool = True,
     ) -> bool:
         if not create_docker_volume(OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME):
             return False
 
-        if not self._construct_run_context(oss_fuzz_path, source_path):
+        if not self._construct_run_context(
+            oss_fuzz_path, custom_project_path, custom_source_path
+        ):
             return False
+
+        project_builder = OSSPatchProjectBuilder(
+            self.work_dir,
+            self.project_name,
+            self.oss_fuzz_path,
+            project_path=self.project_path,
+            force_rebuild=force_rebuild,
+        )
+        if not project_builder.build(
+            self.proj_src_path, inc_build_enabled=inc_build_enabled
+        ):
+            return False
+
+        assert self.proj_src_path.exists()
+        assert is_git_repository(
+            self.proj_src_path
+        )  # FIXME: should support non-git source
 
         if not self._load_necessary_images_to_volume(
             oss_fuzz_path, OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME
@@ -243,7 +294,7 @@ class OSSPatchCRSRunner:
 
         # @TODO: better way to do this deletions
         _remove_all_projects_in_oss_fuzz(
-            copied_oss_fuzz_path, except_project=target_project_path
+            copied_oss_fuzz_path, except_project=self.project_name
         )
 
         return True

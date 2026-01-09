@@ -1,14 +1,12 @@
 from pathlib import Path
 from .crs_builder import OSSPatchCRSBuilder
-from .project_builder import OSSPatchProjectBuilder
-from .crs_runner import OSSPatchCRSRunner
-from .inc_build_checker import IncrementalBuildChecker
-from .inc_build_checker import IncrementalSnapshotMaker
+from .crs_context import OSSPatchCRSContext
+from .inc_build_checker import (
+    IncrementalBuildChecker,
+    IncrementalSnapshotMaker
+)
 from .functions import (
     prepare_docker_cache_builder,
-    pull_project_source,
-    is_git_repository,
-    change_ownership_with_docker,
     get_project_rts_config,
     resolve_rts_config,
     copy_git_repo,
@@ -73,75 +71,45 @@ class OSSPatch:
         if not self.project_work_dir.exists():
             self.project_work_dir.mkdir(parents=True)
 
-    def _prepare_oss_fuzz(self, oss_fuzz_path: Path, overwrite: bool = False) -> bool:
-        if not _copy_oss_fuzz_if_needed(
-            self.oss_fuzz_path, oss_fuzz_path.resolve(), overwrite
-        ):
-            logger.error("Failed to copy OSS-Fuzz")
-            return False
-
-        return True
-
-    def _prepare_project(
+    def _build_crs(
         self,
-        custom_project_path: Path | None = None,
-        overwrite: bool = False,
+        crs_name: str,
+        local_crs: Path | None = None,
+        registry_path: Path | None = None,
+        use_gitcache: bool = False,
+        force_rebuild: bool = False,
     ) -> bool:
-        assert self.oss_fuzz_path.exists()
+        # TODO: better dectection to skip building
+        assert crs_name
 
-        if custom_project_path:
-            custom_project_path = Path(custom_project_path).resolve()
+        crs_builder = OSSPatchCRSBuilder(
+            crs_name,
+            local_crs=local_crs,
+            registry_path=registry_path,
+            use_gitcache=use_gitcache,
+            force_rebuild=force_rebuild,
+        )
 
-            if self.project_path.exists():
-                if not overwrite:
-                    logger.info(
-                        f"Project already exists at {self.project_path}, skipping copy"
-                    )
-                    return True
+        return crs_builder.build()
 
-                logger.info(f"Overwriting existing project at {self.project_path}")
-                shutil.rmtree(self.project_path)
-
-            self.project_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(custom_project_path, self.project_path)
-
-        return True
-
-    def _prepare_environments(
+    def _build_project(
         self,
         oss_fuzz_path: Path,
         custom_project_path: Path | None = None,
         custom_source_path: Path | None = None,
-        overwrite: bool = False,
-        use_gitcache: bool = False,
+        force_rebuild: bool = False,
+        inc_build_enabled: bool = True,
     ) -> bool:
-        logger.info("Preparing environments for running bug-fixing CRS...")
-
-        # Copy oss-fuzz to work directory
-        if not self._prepare_oss_fuzz(oss_fuzz_path, overwrite):
-            logger.error(f'Failed to prepare OSS-Fuzz using "{oss_fuzz_path}"')
+        logger.info(f'Preparing project "{self.project_name}"')
+        
+        crs_context = OSSPatchCRSContext(self.project_name, self.project_work_dir)
+        if not crs_context.build(
+            oss_fuzz_path, 
+            custom_project_path=custom_project_path, 
+            custom_source_path=custom_source_path,
+            force_rebuild=force_rebuild,
+            inc_build_enabled=inc_build_enabled):
             return False
-
-        if not self._prepare_project(custom_project_path, overwrite):
-            logger.error(
-                f'Failed to prepare project directory for "{self.project_name}"'
-            )
-            return False
-
-        if self.source_path.exists():
-            change_ownership_with_docker(self.source_path)
-            shutil.rmtree(self.source_path)
-
-        if custom_source_path:
-            logger.info(f'Using the existing project source: "{custom_source_path}"')
-            shutil.copytree(custom_source_path, self.source_path)
-        else:
-            pull_project_source(self.project_path, self.source_path, use_gitcache)
-
-        assert self.source_path.exists()
-        assert is_git_repository(
-            self.source_path
-        )  # FIXME: should support non-git source
 
         return True
 
@@ -157,48 +125,31 @@ class OSSPatch:
         force_rebuild: bool = False,
         inc_build_enabled: bool = True,
     ) -> bool:
-        # TODO: better dectection to skip building
-        assert self.crs_name
-
         if not prepare_docker_cache_builder():
             return False
 
-        crs_builder = OSSPatchCRSBuilder(
+        assert self.crs_name
+
+        if not self._build_crs(
             self.crs_name,
-            self.project_work_dir,
             local_crs=local_crs,
             registry_path=registry_path,
             use_gitcache=use_gitcache,
             force_rebuild=force_rebuild,
-        )
-        if not crs_builder.build():
-            return False
-
-        self._prepare_environments(
-            oss_fuzz_path,
-            custom_project_path,
-            custom_source_path,
-            overwrite,
-            use_gitcache,
-        )
-
-        project_builder = OSSPatchProjectBuilder(
-            self.project_work_dir,
-            self.project_name,
-            self.oss_fuzz_path,
-            project_path=self.project_path,
-            force_rebuild=force_rebuild,
-        )
-        if not project_builder.build(
-            self.source_path, inc_build_enabled=inc_build_enabled
         ):
             return False
 
-        crs_runner = OSSPatchCRSRunner(self.project_name, self.project_work_dir)
-        if not crs_runner.build(self.oss_fuzz_path, self.source_path):
+        if not self._build_project(
+            oss_fuzz_path,
+            custom_project_path=custom_project_path,
+            custom_source_path=custom_source_path,
+            force_rebuild=force_rebuild,
+            inc_build_enabled=inc_build_enabled,
+        ):
             return False
 
         logger.info(f"CRS building successfully done!")
+
         return True
 
     def run_crs(
@@ -218,7 +169,7 @@ class OSSPatch:
         # Default log_dir to out_dir/logs if not specified
         effective_log_dir = log_dir if log_dir else out_dir / "logs"
 
-        oss_patch_runner = OSSPatchCRSRunner(
+        oss_patch_runner = OSSPatchCRSContext(
             self.project_name,
             self.project_work_dir,
             out_dir,
@@ -236,18 +187,6 @@ class OSSPatch:
             hints_dir,
             "full",  # TODO: support delta mode
         )
-
-    # # Testing purpose function
-    # def run_pov(
-    #     self,
-    #     harness_name: str,
-    #     pov_path: Path,
-    # ) -> tuple[bytes, bytes]:
-    #     oss_patch_runner = OSSPatchCRSRunner(
-    #         self.project_name, self.work_dir, Path("/tmp/out")
-    #     )
-
-    #     return oss_patch_runner.run_pov(harness_name, pov_path)
 
     # Testing purpose function
     def test_inc_build(

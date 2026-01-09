@@ -30,14 +30,12 @@ class OSSPatchCRSBuilder:
     def __init__(
         self,
         crs_name: str,
-        work_dir: Path,
         local_crs: Path | None = None,
         registry_path: Path | None = None,
         use_gitcache: bool = False,
         force_rebuild: bool = False,
     ):
         self.crs_name = crs_name
-        self.work_dir = work_dir
         self.crs_path = local_crs
         # Default to crs_registry using importlib.resources (same as bug_finding)
         self.registry_path = registry_path if registry_path else OSS_CRS_REGISTRY_PATH

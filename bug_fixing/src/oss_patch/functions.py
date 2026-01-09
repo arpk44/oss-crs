@@ -6,6 +6,7 @@ from bug_fixing.src.oss_patch.globals import (
     OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE,
     OSS_PATCH_CACHE_BUILDER_DATA_PATH,
     OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME,
+    DEFAULT_INC_BUILD_REGISTRY,
 )
 from tempfile import TemporaryDirectory
 import os
@@ -689,8 +690,6 @@ def get_git_commit_hash(repository_path: Path) -> str:
 # =============================================================================
 # Inc-build image pull/retag utilities
 # =============================================================================
-
-DEFAULT_INC_BUILD_REGISTRY = "ghcr.io/team-atlanta/crsbench"
 
 
 def get_inc_build_remote_image_name(
