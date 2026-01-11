@@ -72,7 +72,6 @@ def main():  # pylint: disable=too-many-branches,too-many-return-statements
             custom_source_path=_get_path_or_none(args.source_path),
             local_crs=_get_path_or_none(args.local_crs),
             registry_path=_get_path_or_none(args.registry),
-            overwrite=args.overwrite,
             use_gitcache=args.gitcache,
             force_rebuild=args.force_rebuild,
             inc_build_enabled=args.incremental_build,

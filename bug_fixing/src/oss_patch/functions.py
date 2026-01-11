@@ -5,7 +5,6 @@ from bug_fixing.src.oss_patch.globals import (
     DEFAULT_DOCKER_ROOT_DIR,
     OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE,
     OSS_PATCH_CACHE_BUILDER_DATA_PATH,
-    OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME,
     DEFAULT_INC_BUILD_REGISTRY,
 )
 from tempfile import TemporaryDirectory
@@ -101,7 +100,49 @@ def load_image_to_volume(volume_name: str) -> bool:
 def change_ownership_with_docker(target_path: Path) -> bool:
     uid = os.getuid()
     gid = os.getgid()
-    command = f"docker run --rm --privileged -v {target_path.resolve()}:/target {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} chown -R {uid}:{gid} /target"
+    command = f"docker run --rm --privileged -v {target_path.resolve()}:/target alpine:latest chown -R {uid}:{gid} /target"
+
+    proc = subprocess.run(
+        command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True
+    )
+
+    if proc.returncode == 0:
+        return True
+    else:
+        return False
+
+
+def copy_directory_with_docker(src_path: Path, dst_path: Path) -> bool:
+    assert src_path.is_dir()
+    assert dst_path.parent.exists()
+
+    command = (
+        f"docker run --rm --privileged "
+        f"-v {src_path.resolve().parent}:/src "
+        f"-v {dst_path.resolve().parent}:/dst "
+        f"alpine:latest "
+        f"cp -r /src/{src_path.name} /dst/{dst_path.name}"
+    )
+
+    proc = subprocess.run(
+        command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True
+    )
+
+    if proc.returncode == 0:
+        return True
+    else:
+        return False
+
+
+def remove_directory_with_docker(target_path: Path) -> bool:
+    assert target_path.is_dir()
+
+    command = (
+        f"docker run --rm --privileged "
+        f"-v {target_path.resolve().parent}:/target "
+        f"alpine:latest "
+        f"rm -rf /target/{target_path.name}"
+    )
 
     proc = subprocess.run(
         command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True
@@ -213,8 +254,10 @@ def reset_repository(path: Path) -> bool:
         return False
 
 
-def load_images_to_volume(images: list[str], volume_name: str) -> bool:
-    logger.info(f'Loading docker images to "{volume_name}". It may take a while...')
+def load_docker_images_to_dir(images: list[str], docker_root_path: Path) -> bool:
+    logger.info(
+        f'Loading docker images to "{docker_root_path}". It may take a while...'
+    )
 
     if len(images) == 0:
         logger.warning(f"No images to load provided")
@@ -239,7 +282,7 @@ def load_images_to_volume(images: list[str], volume_name: str) -> bool:
         # TODO: skip save if already exists
         docker_load_cmd = (
             f"docker run --privileged --rm "
-            f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME}:{DEFAULT_DOCKER_ROOT_DIR} "
+            f"-v {docker_root_path}:{DEFAULT_DOCKER_ROOT_DIR} "
             f"-v {images_path}:/images "
             f"{OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} "
             f"sh -c 'for f in /images/*; do docker load -i \"$f\"; done'"
@@ -253,6 +296,7 @@ def load_images_to_volume(images: list[str], volume_name: str) -> bool:
         )
 
         if proc.returncode == 0:
+            change_ownership_with_docker(docker_root_path)
             return True
         else:
             return False
@@ -260,11 +304,11 @@ def load_images_to_volume(images: list[str], volume_name: str) -> bool:
     return True
 
 
-def docker_image_exists_in_volume(image_name: str, volume_name: str) -> bool:
+def docker_image_exists_in_dir(image_name: str, docker_root_path: Path) -> bool:
     # assert _docker_volume_exists(volume_name)
 
     # command = f"docker run -d --privileged --name {container_name} -v {volume_name}:{DEFAULT_DOCKER_ROOT_DIR} {OSS_PATCH_DOCKER_CACHE_BUILDER_IMAGE} sleep infinity"
-    command = f"docker run --rm --privileged -v {volume_name}:{DEFAULT_DOCKER_ROOT_DIR} {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} /image_checker.sh {image_name}"
+    command = f"docker run --rm --privileged -v {docker_root_path}:{DEFAULT_DOCKER_ROOT_DIR} {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} /image_checker.sh {image_name}"
 
     # subprocess.check_call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
 

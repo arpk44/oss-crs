@@ -4,13 +4,13 @@ import shutil
 import yaml
 import base64
 import subprocess
+import secrets
 from bug_fixing.src.oss_patch.functions import (
     get_runner_image_name,
     run_command,
-    create_docker_volume,
     docker_image_exists,
-    docker_image_exists_in_volume,
-    load_images_to_volume,
+    docker_image_exists_in_dir,
+    load_docker_images_to_dir,
     get_builder_image_name,
     get_incremental_build_image_name,
     get_base_runner_image_name,
@@ -19,11 +19,12 @@ from bug_fixing.src.oss_patch.functions import (
     change_ownership_with_docker,
     copy_git_repo,
     pull_project_source,
-    is_git_repository
+    is_git_repository,
+    copy_directory_with_docker,
+    remove_directory_with_docker,
 )
 from bug_fixing.src.oss_patch.project_builder import OSSPatchProjectBuilder
 from bug_fixing.src.oss_patch.globals import (
-    OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME,
     DEFAULT_DOCKER_ROOT_DIR,
     OSS_PATCH_BUILD_CONTEXT_DIR,
     OSS_PATCH_RUNNER_DATA_PATH,
@@ -113,11 +114,12 @@ class OSSPatchCRSContext:
         memory: str | None = None,
     ):
         self.project_name = project_name
-        self.work_dir = work_dir
+        self.work_dir = work_dir.resolve()
         self.run_context_dir = self.work_dir / "run_context"
         self.oss_fuzz_path = self.run_context_dir / "oss-fuzz"
         self.project_path = self.oss_fuzz_path / "projects" / self.project_name
         self.proj_src_path = self.run_context_dir / "proj-src"
+        self.docker_root_path = self.work_dir / "docker"
 
         self.out_dir = out_dir
         self.log_dir = log_dir
@@ -143,6 +145,12 @@ class OSSPatchCRSContext:
         with open(self.run_context_dir / "config.yaml", "w") as f:
             f.write(yaml.safe_dump(config_yaml, sort_keys=False))
 
+    def _create_dedicated_docker_root(self):
+        assert self.run_context_dir.exists()
+
+        if not self.docker_root_path.exists():
+            self.docker_root_path.mkdir()
+
     def _construct_run_context(
         self,
         oss_fuzz_path: Path,
@@ -157,6 +165,8 @@ class OSSPatchCRSContext:
             shutil.rmtree(self.run_context_dir)
 
         self.run_context_dir.mkdir()
+
+        self._create_dedicated_docker_root()
 
         shutil.copytree(oss_fuzz_path, self.oss_fuzz_path)
 
@@ -185,9 +195,7 @@ class OSSPatchCRSContext:
 
         return True
 
-    def _load_necessary_images_to_volume(
-        self, oss_fuzz_path: Path, volume_name: str
-    ) -> bool:
+    def _load_necessary_images_to_docker_root(self, oss_fuzz_path: Path) -> bool:
         # Choose between incremental-build-enabled builder image and original builder image
         if docker_image_exists(
             get_incremental_build_image_name(
@@ -207,15 +215,15 @@ class OSSPatchCRSContext:
             get_base_runner_image_name(oss_fuzz_path),
         ]
         # TODO: optimize speed; caching
-        if not load_images_to_volume(
+        if not load_docker_images_to_dir(
             [
                 image_name
                 for image_name in images_to_load
-                if not docker_image_exists_in_volume(image_name, volume_name)
+                if not docker_image_exists_in_dir(image_name, self.docker_root_path)
             ],
-            volume_name,
+            self.docker_root_path,
         ):
-            logger.error(f'Image loading to "{volume_name}" has failed')
+            logger.error(f'Image loading to "{self.docker_root_path}" has failed')
             return False
 
         return True
@@ -228,9 +236,6 @@ class OSSPatchCRSContext:
         force_rebuild: bool = False,
         inc_build_enabled: bool = True,
     ) -> bool:
-        if not create_docker_volume(OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME):
-            return False
-
         if not self._construct_run_context(
             oss_fuzz_path, custom_project_path, custom_source_path
         ):
@@ -253,9 +258,7 @@ class OSSPatchCRSContext:
             self.proj_src_path
         )  # FIXME: should support non-git source
 
-        if not self._load_necessary_images_to_volume(
-            oss_fuzz_path, OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME
-        ):
+        if not self._load_necessary_images_to_docker_root(oss_fuzz_path):
             return False
 
         return True
@@ -417,6 +420,11 @@ class OSSPatchCRSContext:
             log_file = self.log_dir / f"crs_run_{safe_name}_{timestamp}.log"
             logger.info(f"CRS execution log will be saved to: {log_file}")
 
+        tmp_docker_root_dir = self.work_dir / f"run-{secrets.token_hex(8)}"
+        # @TODO: find a way to optimize this copying routine
+        logger.info(f'Copying pre-populated docker root to "{tmp_docker_root_dir}"')
+        copy_directory_with_docker(self.docker_root_path, tmp_docker_root_dir)
+
         with TemporaryDirectory() as tmp_dir:
             crs_run_tmp_dir = Path(tmp_dir)
             try:
@@ -436,7 +444,7 @@ class OSSPatchCRSContext:
                 command = (
                     f"docker run --rm --privileged "
                     f"{resource_flags}"
-                    f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME}:/var/lib/docker "
+                    f"-v {tmp_docker_root_dir}:/var/lib/docker "
                     f"-v {tmp_oss_fuzz_path}:/oss-fuzz "
                     f"-v {tmp_proj_src_path}:/cp-sources "
                     f"-v {self.work_dir.resolve()}:/work "
@@ -449,6 +457,8 @@ class OSSPatchCRSContext:
                     f"{get_crs_image_name(crs_name)}"
                 )
 
+                print(command)
+                exit(-1)
                 try:
                     # @TODO: ensure the clean-up of existing docker processes
                     # subprocess.check_call(command, shell=True)
@@ -461,6 +471,9 @@ class OSSPatchCRSContext:
             finally:
                 change_ownership_with_docker(crs_run_tmp_dir)
                 change_ownership_with_docker(self.out_dir)
+                # remove_directory_with_docker(tmp_docker_root_dir)
+                # self._unmount_docker_root_in_overlay(mount_base_dir)
+                # change_ownership_with_docker(mount_base_dir)
 
     def _prepare_hints(self, hints_path: Path):
         shutil.copytree(hints_path, self.work_dir / "hints")
@@ -501,7 +514,7 @@ class OSSPatchCRSContext:
 
         runner_command = (
             f"docker run --rm --privileged "
-            f"-v {OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME}:{DEFAULT_DOCKER_ROOT_DIR} "
+            f"-v {self.docker_root_path}:{DEFAULT_DOCKER_ROOT_DIR} "
             f"-v {source_path}:/cp-sources "
             f"{get_runner_image_name(self.project_name)} "
             f"{build_fuzzers_command}"

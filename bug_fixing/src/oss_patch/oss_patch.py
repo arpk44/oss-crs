@@ -1,10 +1,7 @@
 from pathlib import Path
 from .crs_builder import OSSPatchCRSBuilder
 from .crs_context import OSSPatchCRSContext
-from .inc_build_checker import (
-    IncrementalBuildChecker,
-    IncrementalSnapshotMaker
-)
+from .inc_build_checker import IncrementalBuildChecker, IncrementalSnapshotMaker
 from .functions import (
     prepare_docker_cache_builder,
     get_project_rts_config,
@@ -76,14 +73,15 @@ class OSSPatch:
         inc_build_enabled: bool = True,
     ) -> bool:
         logger.info(f'Preparing project "{self.project_name}"')
-        
+
         crs_context = OSSPatchCRSContext(self.project_name, self.project_work_dir)
         if not crs_context.build(
-            oss_fuzz_path, 
-            custom_project_path=custom_project_path, 
+            oss_fuzz_path,
+            custom_project_path=custom_project_path,
             custom_source_path=custom_source_path,
             force_rebuild=force_rebuild,
-            inc_build_enabled=inc_build_enabled):
+            inc_build_enabled=inc_build_enabled,
+        ):
             return False
 
         return True

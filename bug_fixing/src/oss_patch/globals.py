@@ -21,7 +21,6 @@ OSS_CRS_REGISTRY_PATH = OSS_CRS_PATH / "crs_registry"
 
 # Docker image names (constants)
 OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE = "gcr.io/oss-patch/docker-data-manager"
-OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME = "images-for-crs-volume"
 DEFAULT_DOCKER_ROOT_DIR = "/var/lib/docker"
 OSS_FUZZ_BASE_RUNNER_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
 DEFAULT_PROJECT_SOURCE_NAME = "project-src"

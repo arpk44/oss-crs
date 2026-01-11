@@ -20,7 +20,6 @@ from bug_fixing.src.oss_patch.functions import (
     ensure_inc_build_image,
 )
 from bug_fixing.src.oss_patch.globals import (
-    OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME,
     DEFAULT_DOCKER_ROOT_DIR,
     OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE,
     OSS_PATCH_RUNNER_DATA_PATH,
@@ -292,15 +291,13 @@ class OSSPatchProjectBuilder:
             proc.stderr if proc.stderr else b"",
         )
 
-    def remove_builder_image(
-        self, volume_name: str = OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME
-    ) -> bool:
+    def remove_builder_image(self, docker_root_path: Path) -> bool:
         logger.info(
-            f'Removing "{get_builder_image_name(self.oss_fuzz_path, self.project_name)}" from {volume_name}'
+            f'Removing "{get_builder_image_name(self.oss_fuzz_path, self.project_name)}" from "{docker_root_path}"'
         )
         container_command = f"docker rmi {get_builder_image_name(self.oss_fuzz_path, self.project_name)}"
 
-        command = f"docker run --rm --privileged -v {volume_name}:{DEFAULT_DOCKER_ROOT_DIR} {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} {container_command}"
+        command = f"docker run --rm --privileged -v {docker_root_path}:{DEFAULT_DOCKER_ROOT_DIR} {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} {container_command}"
 
         try:
             subprocess.check_call(
@@ -375,10 +372,6 @@ class OSSPatchProjectBuilder:
 
         return True
 
-    def _prepare_docker_volumes(self) -> bool:
-        if not create_docker_volume(OSS_PATCH_DOCKER_IMAGES_FOR_CRS_VOLUME):
-            return False
-        return True
 
     def _prepare_builder_image(self) -> bool:
         builder_image_name = get_builder_image_name(
