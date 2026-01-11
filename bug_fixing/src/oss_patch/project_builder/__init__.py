@@ -118,14 +118,12 @@ def _run_subprocess_with_logging(
 class OSSPatchProjectBuilder:
     def __init__(
         self,
-        work_dir: Path,
         project_name: str,
         oss_fuzz_path: Path,
         project_path: Path,
         log_file: Path | None = None,
         force_rebuild: bool = False,
     ):
-        self.work_dir = work_dir
         self.project_name = project_name
         self.oss_fuzz_path = oss_fuzz_path.resolve()
         self.project_path = project_path

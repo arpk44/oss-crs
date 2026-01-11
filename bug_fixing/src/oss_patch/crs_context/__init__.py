@@ -228,7 +228,6 @@ class OSSPatchCRSContext:
             return False
 
         project_builder = OSSPatchProjectBuilder(
-            self.work_dir,
             self.project_name,
             self.oss_fuzz_path,
             project_path=self.project_path,
