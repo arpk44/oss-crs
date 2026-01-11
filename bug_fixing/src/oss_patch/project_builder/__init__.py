@@ -1,5 +1,4 @@
 from pathlib import Path
-import shutil
 import logging
 import yaml
 import subprocess
@@ -7,7 +6,6 @@ import tempfile
 import re
 import os
 import sys
-from contextlib import contextmanager
 
 from bug_fixing.src.oss_patch.functions import (
     docker_image_exists,
@@ -21,8 +19,6 @@ from bug_fixing.src.oss_patch.functions import (
     retag_docker_image,
 )
 from bug_fixing.src.oss_patch.globals import (
-    DEFAULT_DOCKER_ROOT_DIR,
-    OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE,
     OSS_PATCH_RUNNER_DATA_PATH,
 )
 
@@ -53,25 +49,6 @@ fi
 
 
 logger = logging.getLogger(__name__)
-
-
-@contextmanager
-def temp_build_context(path_name="temp_data"):
-    temp_path = Path(path_name).resolve()
-
-    try:
-        temp_path.mkdir(exist_ok=True)
-    except OSError as e:
-        raise e
-
-    try:
-        yield temp_path
-    finally:
-        if temp_path.exists():
-            try:
-                shutil.rmtree(temp_path)
-            except OSError:
-                pass
 
 
 def _read_lang_from_project_yaml(proj_yaml_path: Path) -> str:
@@ -258,26 +235,6 @@ class OSSPatchProjectBuilder:
             proc.stderr if proc.stderr else b"",
         )
 
-    def remove_builder_image(self, docker_root_path: Path) -> bool:
-        logger.info(
-            f'Removing "{get_builder_image_name(self.oss_fuzz_path, self.project_name)}" from "{docker_root_path}"'
-        )
-        container_command = f"docker rmi {get_builder_image_name(self.oss_fuzz_path, self.project_name)}"
-
-        command = f"docker run --rm --privileged -v {docker_root_path}:{DEFAULT_DOCKER_ROOT_DIR} {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} {container_command}"
-
-        try:
-            subprocess.check_call(
-                command,
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except subprocess.CalledProcessError:
-            return False
-
-        return True
-
     def _validate_arguments(self):
         # Validate OSS-Fuzz path
         if not self.oss_fuzz_path.exists():
@@ -383,34 +340,18 @@ class OSSPatchProjectBuilder:
             logger.error(f'The image "{image_name}" does not exist in docker daemon')
             return False
 
-        # command = f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} stat /usr/local/bin/replay_build.sh"
         command = f"docker run --rm {get_builder_image_name(self.oss_fuzz_path, self.project_name)} pwd"
 
-        # subprocess.check_call(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
-
         proc = subprocess.run(command, capture_output=True, shell=True)
-        # proc = subprocess.run(
-        #     command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True
-        # )
 
         if proc.stdout.decode().startswith("/built-src"):
             return True
         else:
             return False
 
-        # if proc.returncode == 0:
-        #     return True
-        # else:
-        #     return False
-
     def _take_incremental_build_snapshot_for_c(
         self, source_path: Path, rts_enabled: bool = False, sanitizer: str = "address"
     ) -> bool:
-        # if not self._detect_incremental_build(volume_name):
-        #     logger.info(
-        #         "`replay_build.sh` not detected, incremental build feature disabled."
-        #     )
-        #     return False
         project_path = self.oss_fuzz_path / "projects" / self.project_name
 
         builder_image_name = get_builder_image_name(
