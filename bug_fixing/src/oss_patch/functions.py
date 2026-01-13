@@ -6,6 +6,7 @@ from bug_fixing.src.oss_patch.globals import (
     OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE,
     OSS_PATCH_CACHE_BUILDER_DATA_PATH,
     DEFAULT_INC_BUILD_REGISTRY,
+    OSS_CRS_PATH,
 )
 from tempfile import TemporaryDirectory
 import os
@@ -506,8 +507,10 @@ def run_command(command: str, n: int = 5, log_file: Path | None = None) -> None:
 
 def _build_docker_cache_builder_image() -> bool:
     try:
+        # Context must be oss-crs root because Dockerfile uses paths like
+        # "bug_fixing/base_images/..." which are relative to oss-crs/
         run_command(
-            f"docker build --tag {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} --file {OSS_PATCH_CACHE_BUILDER_DATA_PATH / 'Dockerfile'} {str(Path.cwd())}"
+            f"docker build --tag {OSS_PATCH_DOCKER_DATA_MANAGER_IMAGE} --file {OSS_PATCH_CACHE_BUILDER_DATA_PATH / 'Dockerfile'} {OSS_CRS_PATH}"
         )
 
         return True
