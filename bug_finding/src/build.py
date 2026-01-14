@@ -266,14 +266,6 @@ def build_crs(
     # Build project image
     _build_project_image(project_name, oss_fuzz_dir, architecture)
 
-    # Compute source_tag for image versioning if source_path provided
-    source_tag = None
-    if source_path:
-        source_tag = hashlib.sha256(
-            str(source_path).encode() + project_name.encode()
-        ).hexdigest()[:12]
-        logger.info("Using source tag for image versioning: %s", source_tag)
-
     # Generate compose files using render_compose module
     logger.info("Generating compose-build.yaml")
     try:
@@ -354,10 +346,7 @@ def build_crs(
 
                     # Generate unique container name for docker commit
                     container_name = f"crs-source-copy-{uuid.uuid4().hex}"
-                    # Use tagged image name for version control if source_tag exists
                     image_name = f"{project_name}_{crs_name}_builder"
-                    if source_tag:
-                        image_name = f"{image_name}:{source_tag}"
 
                     logger.info(
                         "Copying source from /local-source-mount to workdir for: %s",
