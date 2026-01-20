@@ -174,6 +174,7 @@ def build_crs(
     project_image_prefix: str = "gcr.io/oss-fuzz",
     external_litellm: bool = False,
     source_oss_fuzz_dir: Path | None = None,
+    skip_oss_fuzz_clone: bool = False,
 ) -> bool:
     """
     Build CRS for a project using docker compose.
@@ -195,6 +196,7 @@ def build_crs(
         project_image_prefix: Project image prefix (default: gcr.io/oss-fuzz)
         external_litellm: Use external LiteLLM instance (default: False)
         source_oss_fuzz_dir: Optional source OSS-Fuzz directory to copy from (Path, already resolved)
+        skip_oss_fuzz_clone: Skip cloning oss-fuzz (default: False)
 
     Returns:
         bool: True if successful, False otherwise
@@ -210,8 +212,9 @@ def build_crs(
 
     # Note: No need to verify external_litellm during build - LiteLLM is only used during run
 
-    if not clone_oss_fuzz_if_needed(oss_fuzz_dir, source_oss_fuzz_dir, project_name):
-        return False
+    if not skip_oss_fuzz_clone:
+        if not clone_oss_fuzz_if_needed(oss_fuzz_dir, source_oss_fuzz_dir, project_name):
+            return False
 
     # Copy project_path to oss-fuzz/projects/{project_name} if provided
     if project_path:

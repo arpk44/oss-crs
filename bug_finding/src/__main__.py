@@ -80,6 +80,11 @@ def main() -> int:
     build_parser.add_argument(
         "--gitcache", action="store_true", help="Use gitcache for git clone operations"
     )
+    build_parser.add_argument(
+        "--skip-oss-fuzz-clone",
+        action="store_true",
+        help="Skip cloning oss-fuzz (user guarantees oss-fuzz is already available)",
+    )
 
     # run_crs subcommand
     run_parser = subparsers.add_parser("run", help="Run CRS")
@@ -152,6 +157,11 @@ def main() -> int:
         default=None,
         help="Directory containing initial corpus files to copy to ensemble corpus",
     )
+    run_parser.add_argument(
+        "--skip-oss-fuzz-clone",
+        action="store_true",
+        help="Skip cloning oss-fuzz (user guarantees oss-fuzz is already available)",
+    )
 
     args = parser.parse_args()
 
@@ -191,6 +201,7 @@ def main() -> int:
             "clone": args.clone,
             "project_image_prefix": args.project_image_prefix,
             "external_litellm": args.external_litellm,
+            "skip_oss_fuzz_clone": args.skip_oss_fuzz_clone,
         }
 
         # Only add optional paths if provided
@@ -233,6 +244,7 @@ def main() -> int:
             "sanitizer": args.sanitizer,
             "architecture": args.architecture,
             "external_litellm": args.external_litellm,
+            "skip_oss_fuzz_clone": args.skip_oss_fuzz_clone,
         }
 
         # Only add optional paths if provided

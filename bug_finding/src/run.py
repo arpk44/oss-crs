@@ -47,6 +47,7 @@ def run_crs(
     ensemble_dir: Path | None = None,
     disable_ensemble: bool = False,
     corpus_dir: Path | None = None,
+    skip_oss_fuzz_clone: bool = False,
 ) -> bool:
     """
     Run CRS using docker compose.
@@ -72,6 +73,7 @@ def run_crs(
         ensemble_dir: Optional base directory for ensemble sharing (Path, already resolved)
         disable_ensemble: Disable automatic ensemble directory for multi-CRS mode
         corpus_dir: Optional directory containing initial corpus files to copy to ensemble corpus
+        skip_oss_fuzz_clone: Skip cloning oss-fuzz (default: False)
 
     Returns:
         bool: True if successful, False otherwise
@@ -85,8 +87,9 @@ def run_crs(
         logger.error("LITELLM_URL or LITELLM_KEY is not provided in the environment")
         return False
 
-    if not clone_oss_fuzz_if_needed(oss_fuzz_dir, source_oss_fuzz_dir, project_name):
-        return False
+    if not skip_oss_fuzz_clone:
+        if not clone_oss_fuzz_if_needed(oss_fuzz_dir, source_oss_fuzz_dir, project_name):
+            return False
 
     # Validate CRS modes against diff_path
     if not validate_crs_modes(config_dir, worker, registry_dir, diff_path):
