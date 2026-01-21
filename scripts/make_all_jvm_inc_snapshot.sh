@@ -15,6 +15,7 @@ PUSH_MODE=""  # base, inc, both, or empty (no push)
 RTS_TOOL=""   # If empty, uses project.yaml rts_mode
 FORCE_REBUILD=false  # Default: skip rebuild if image exists
 SKIP_CLONE=false
+FORCE_PUSH=false
 
 usage() {
     echo "Usage: $0 <OSS_FUZZ_PATH> [options]"
@@ -29,6 +30,7 @@ usage() {
     echo "  --rts-tool TOOL     RTS tool override: jcgeks, openclover (JVM). If not specified, uses project.yaml rts_mode"
     echo "  --force-rebuild     Force rebuild even if local image exists (default: skip)"
     echo "  --skip-clone        Skip source code cloning"
+    echo "  --force-push        Force push even if images already exist in remote registry"
     echo "  -h, --help          Show this help message"
     echo ""
     echo "Examples:"
@@ -76,6 +78,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_CLONE=true
             shift
             ;;
+        --force-push)
+            FORCE_PUSH=true
+            shift
+            ;;
         -h|--help)
             usage
             ;;
@@ -108,6 +114,7 @@ echo "Push mode: ${PUSH_MODE:-none}"
 echo "RTS tool: ${RTS_TOOL:-from project.yaml}"
 echo "Force rebuild: $FORCE_REBUILD"
 echo "Skip clone: $SKIP_CLONE"
+echo "Force push: $FORCE_PUSH"
 
 # Get list of projects
 if [ -n "$PROJECT_LIST" ]; then
@@ -144,6 +151,9 @@ build_cmd_opts() {
     fi
     if [ "$SKIP_CLONE" = true ]; then
         opts="$opts --skip-clone"
+    fi
+    if [ "$FORCE_PUSH" = true ]; then
+        opts="$opts --force-push"
     fi
     echo "$opts"
 }
@@ -245,6 +255,7 @@ Push mode: ${PUSH_MODE:-none}
 RTS tool: ${RTS_TOOL:-from project.yaml}
 Force rebuild: $FORCE_REBUILD
 Skip clone: $SKIP_CLONE
+Force push: $FORCE_PUSH
 
 Total: $total
 Passed: $passed
