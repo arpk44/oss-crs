@@ -29,6 +29,36 @@ from tempfile import TemporaryDirectory
 logger = logging.getLogger()
 
 
+def _copy_clean_oss_fuzz(src_oss_fuzz: Path, dst_oss_fuzz: Path) -> None:
+    """
+    Copy OSS-Fuzz directory excluding build artifacts and unnecessary files.
+
+    - Keeps .git directory for version tracking (needed by get_git_commit_hash)
+    - Creates empty build/ directory (excludes all contents)
+
+    Args:
+        src_oss_fuzz: Source OSS-Fuzz directory path
+        dst_oss_fuzz: Destination OSS-Fuzz directory path
+    """
+    def ignore_build_artifacts(directory, contents):
+        ignored = []
+        dir_path = Path(directory)
+
+        # At OSS-Fuzz root level, exclude projects directory only
+        if directory == str(src_oss_fuzz):
+            ignored.append("projects")  # Will copy only needed project separately
+
+        # Inside build/ directory, exclude ALL contents
+        if dir_path == src_oss_fuzz / "build":
+            return contents  # Ignore everything inside build/
+
+        return ignored
+
+    logger.info(f"Copying clean OSS-Fuzz from {src_oss_fuzz} to {dst_oss_fuzz}...")
+    shutil.copytree(src_oss_fuzz, dst_oss_fuzz, ignore=ignore_build_artifacts)
+    logger.info("Clean OSS-Fuzz copied successfully.")
+
+
 def _disable_force_build_in_oss_fuzz(oss_fuzz_path: Path):
     helper_path = oss_fuzz_path / "infra/helper.py"
 
@@ -133,7 +163,6 @@ class OSSPatchCRSContext:
         custom_project_path: Path | None = None,
         custom_source_path: Path | None = None,
     ) -> bool:
-        
         if self._should_skip(oss_fuzz_path, custom_source_path):
             return True
 
@@ -144,23 +173,34 @@ class OSSPatchCRSContext:
 
         self._create_dedicated_docker_root()
 
-        shutil.copytree(oss_fuzz_path, self.oss_fuzz_path)
+        # Copy clean OSS-Fuzz (excludes build/, projects/, .git/)
+        _copy_clean_oss_fuzz(oss_fuzz_path, self.oss_fuzz_path)
 
-        # Copy the custom-provided project
+        # Create projects directory and copy only the needed project
+        logger.info(f"Copying project {self.project_name}...")
+        (self.oss_fuzz_path / "projects").mkdir(exist_ok=True)
+
         if custom_project_path:
-            if self.project_path.exists():
-                shutil.rmtree(self.project_path)
+            logger.info(f"Using custom project from {custom_project_path}...")
             shutil.copytree(custom_project_path, self.project_path)
-
-        _remove_all_projects_in_oss_fuzz(self.oss_fuzz_path, self.project_name)
+        else:
+            # Copy the project from original oss-fuzz
+            shutil.copytree(oss_fuzz_path / "projects" / self.project_name, self.project_path)
+        logger.info(f"Project {self.project_name} copied successfully.")
 
         assert self.project_path.exists()
 
         if custom_source_path:
             logger.info(f'Using the provided project source: "{custom_source_path}"')
+            logger.info("Copying project source...")
             shutil.copytree(custom_source_path, self.proj_src_path)
+            logger.info("Project source copied successfully.")
         else:
-            pull_project_source(self.project_path, self.proj_src_path)
+            logger.info("Pulling project source code...")
+            if not pull_project_source(self.project_path, self.proj_src_path):
+                logger.error("Failed to pull project source code")
+                return False
+            logger.info("Project source pulled successfully.")
 
         _disable_force_build_in_oss_fuzz(self.oss_fuzz_path)
 
@@ -204,6 +244,7 @@ class OSSPatchCRSContext:
         ):
             return False
 
+        logger.info("Building project with OSS-Fuzz...")
         project_builder = OSSPatchProjectBuilder(
             self.project_name,
             self.oss_fuzz_path,
@@ -214,14 +255,17 @@ class OSSPatchCRSContext:
             self.proj_src_path, inc_build_enabled=inc_build_enabled
         ):
             return False
+        logger.info("Project build completed successfully.")
 
         assert self.proj_src_path.exists()
         assert is_git_repository(
             self.proj_src_path
         )  # FIXME: should support non-git source
 
+        logger.info("Loading necessary Docker images...")
         if not self._load_necessary_images_to_docker_root():
             return False
+        logger.info("Docker images loaded successfully.")
 
         return True
 
