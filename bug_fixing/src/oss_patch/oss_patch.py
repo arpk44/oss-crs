@@ -174,6 +174,7 @@ class OSSPatch:
         skip_clone: bool = False,
         skip_baseline: bool = False,
         skip_snapshot: bool = False,
+        benchmarks_dir: Path | None = None,
     ) -> bool:
         oss_fuzz_path = oss_fuzz_path.resolve()
         if source_path:
@@ -196,7 +197,11 @@ class OSSPatch:
 
         # Create the checker
         checker = IncrementalBuildChecker(
-            oss_fuzz_path, self.project_name, self.project_work_dir, log_file=log_file
+            oss_fuzz_path,
+            self.project_name,
+            self.project_work_dir,
+            log_file=log_file,
+            benchmarks_dir=benchmarks_dir,
         )
 
         # Choose workflow based on configuration
@@ -235,6 +240,7 @@ class OSSPatch:
         log_file: Path | None = None,
         skip_clone: bool = False,
         force_push: bool = False,
+        benchmarks_dir: Path | None = None,
     ) -> bool:
         """Create incremental build snapshot and optionally push to registry.
 
@@ -270,7 +276,11 @@ class OSSPatch:
         )
 
         maker = IncrementalSnapshotMaker(
-            oss_fuzz_path, self.project_name, self.project_work_dir, log_file=log_file
+            oss_fuzz_path,
+            self.project_name,
+            self.project_work_dir,
+            log_file=log_file,
+            benchmarks_dir=benchmarks_dir,
         )
 
         return maker.make_snapshot(
