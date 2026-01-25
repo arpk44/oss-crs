@@ -639,11 +639,13 @@ class OSSPatchProjectBuilder:
             proc = subprocess.run(
                 create_container_command,
                 shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                capture_output=True,
             )
             if proc.returncode != 0:
-                logger.error("docker create command has failed")
+                logger.error(
+                    f"docker create command has failed: "
+                    f"stderr: {proc.stderr.decode()}, stdout: {proc.stdout.decode()}"
+                )
                 return False
 
             with tempfile.TemporaryDirectory() as tmp_dir:
