@@ -11,19 +11,26 @@ OSS_CRS_DIR="$(dirname "$SCRIPT_DIR")"
 # Default values
 JOBS=1
 PROJECT_LIST=""
+BENCHMARKS_DIR=""
 
 usage() {
-    echo "Usage: $0 <OSS_FUZZ_PATH> [-j|--jobs N] [-l|--list FILE]"
+    echo "Usage: $0 <OSS_FUZZ_PATH> -b <BENCHMARKS_DIR> [-j|--jobs N] [-l|--list FILE]"
     echo ""
     echo "Arguments:"
-    echo "  OSS_FUZZ_PATH    Path to OSS-Fuzz directory"
+    echo "  OSS_FUZZ_PATH      Path to OSS-Fuzz directory"
+    echo ""
+    echo "Required Options:"
+    echo "  -b, --benchmarks-dir DIR  Benchmarks directory with bundled tarballs (pkgs/)"
     echo ""
     echo "Options:"
-    echo "  -j, --jobs N     Number of parallel jobs (default: 1)"
-    echo "  -l, --list FILE  File containing project names (one per line)"
-    echo "  -h, --help       Show this help message"
+    echo "  -j, --jobs N       Number of parallel jobs (default: 1)"
+    echo "  -l, --list FILE    File containing project names (one per line)"
+    echo "  -h, --help         Show this help message"
     echo ""
     echo "Note: inc_build and rts_mode are determined by each project's project.yaml setting."
+    echo ""
+    echo "Example:"
+    echo "  $0 ../oss-fuzz -b ../../benchmarks"
     exit 1
 }
 
@@ -37,6 +44,10 @@ shift
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -b|--benchmarks-dir)
+            BENCHMARKS_DIR="$2"
+            shift 2
+            ;;
         -j|--jobs)
             JOBS="$2"
             shift 2
@@ -55,6 +66,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [ -z "$BENCHMARKS_DIR" ]; then
+    echo "Error: --benchmarks-dir is required"
+    usage
+fi
+
+if [ ! -d "$BENCHMARKS_DIR" ]; then
+    echo "Error: Benchmarks directory not found: $BENCHMARKS_DIR"
+    exit 1
+fi
+
 if ! [[ "$JOBS" =~ ^[0-9]+$ ]] || [ "$JOBS" -lt 1 ]; then
     echo "Error: jobs must be a positive integer"
     exit 1
@@ -70,10 +91,11 @@ echo "=========================================="
 echo "C Incremental Build Test Runner"
 echo "(using project.yaml settings)"
 echo "=========================================="
-echo "OSS-Fuzz path: $OSS_FUZZ_PATH"
-echo "C projects:   $C_PROJECTS_DIR"
-echo "Log directory: $LOG_DIR"
-echo "Parallel jobs: $JOBS"
+echo "OSS-Fuzz path:    $OSS_FUZZ_PATH"
+echo "Benchmarks dir:   $BENCHMARKS_DIR"
+echo "C projects:       $C_PROJECTS_DIR"
+echo "Log directory:    $LOG_DIR"
+echo "Parallel jobs:    $JOBS"
 
 # Get list of projects
 if [ -n "$PROJECT_LIST" ]; then
@@ -102,12 +124,13 @@ run_single_test() {
     local log_dir="$2"
     local oss_fuzz_path="$3"
     local result_dir="$4"
+    local benchmarks_dir="$5"
 
     local log_file="$log_dir/${project}.log"
     local result_file="$result_dir/${project}.result"
 
     # Use --with-rts to enable RTS based on project.yaml rts_mode setting
-    if uv run oss-bugfix-crs test-inc-build "aixcc/c/$project" "$oss_fuzz_path" --with-rts > "$log_file" 2>&1; then
+    if uv run oss-bugfix-crs test-inc-build "aixcc/c/$project" "$oss_fuzz_path" --benchmarks-dir "$benchmarks_dir" --with-rts > "$log_file" 2>&1; then
         echo "PASSED" > "$result_file"
     else
         echo "FAILED" > "$result_file"
@@ -126,7 +149,7 @@ if [ "$JOBS" -eq 1 ]; then
         result_file="$RESULT_DIR/${project}.result"
 
         # Use --with-rts to enable RTS based on project.yaml rts_mode setting
-        if uv run oss-bugfix-crs test-inc-build "aixcc/c/$project" "$OSS_FUZZ_PATH" --with-rts > "$log_file" 2>&1; then
+        if uv run oss-bugfix-crs test-inc-build "aixcc/c/$project" "$OSS_FUZZ_PATH" --benchmarks-dir "$BENCHMARKS_DIR" --with-rts > "$log_file" 2>&1; then
             echo "  ✓ PASSED"
             echo "PASSED" > "$result_file"
         else
@@ -138,7 +161,7 @@ else
     # Parallel execution using xargs
     echo "Running tests in parallel..."
     printf '%s\n' "${projects[@]}" | xargs -P "$JOBS" -I {} bash -c \
-        'run_single_test "$@"' _ {} "$LOG_DIR" "$OSS_FUZZ_PATH" "$RESULT_DIR"
+        'run_single_test "$@"' _ {} "$LOG_DIR" "$OSS_FUZZ_PATH" "$RESULT_DIR" "$BENCHMARKS_DIR"
 
     # Print results after parallel execution
     for project in "${projects[@]}"; do
