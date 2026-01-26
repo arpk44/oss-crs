@@ -21,6 +21,242 @@ import yaml
 logger = logging.getLogger()
 
 
+def _get_source_name_from_dockerfile(dockerfile_path: Path) -> str | None:
+    """Extract source directory name from Dockerfile WORKDIR directive.
+
+    Parses the last WORKDIR in Dockerfile to determine source directory name.
+    Handles common patterns like:
+    - WORKDIR $SRC/curl -> curl
+    - WORKDIR /src/curl -> curl
+    - WORKDIR libtiff -> libtiff
+
+    Args:
+        dockerfile_path: Path to Dockerfile
+
+    Returns:
+        Source directory name, or None if not found
+    """
+    import re
+
+    if not dockerfile_path.exists():
+        logger.error(f"Dockerfile not found: {dockerfile_path}")
+        return None
+
+    lines = dockerfile_path.read_text().splitlines()
+
+    for line in reversed(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        match = re.match(r"WORKDIR\s+(.+)", stripped, re.IGNORECASE)
+        if match:
+            workdir = match.group(1).strip()
+            # Normalize: remove common prefixes
+            for prefix in ["$SRC/", "${SRC}/", "/src/"]:
+                if workdir.startswith(prefix):
+                    workdir = workdir[len(prefix) :]
+                    break
+            # Return last path component
+            return Path(workdir).name
+
+    logger.warning(f"No WORKDIR found in {dockerfile_path}")
+    return None
+
+
+def find_main_repo_tarball(benchmarks_dir: Path, project_name: str) -> Path | None:
+    """Find the main repo tarball in benchmarks directory.
+
+    Searches for the tarball in:
+    - benchmarks_dir/{benchmark_name}/pkgs/{source_name}.tar.gz
+
+    The source_name is extracted from Dockerfile's WORKDIR directive.
+
+    Args:
+        benchmarks_dir: Directory containing benchmarks (e.g., crsbench-2/benchmarks)
+        project_name: OSS-Fuzz project name (e.g., "afc-curl-delta-01")
+
+    Returns:
+        Path to the tarball if found, None otherwise
+    """
+    # For project names like "aixcc/c/afc-curl-delta-01", extract the benchmark name
+    benchmark_name = project_name.split("/")[-1]
+
+    benchmark_dir = benchmarks_dir / benchmark_name
+    pkgs_dir = benchmark_dir / "pkgs"
+
+    if not pkgs_dir.exists():
+        logger.error(f"pkgs directory not found: {pkgs_dir}")
+        return None
+
+    # Get source name from Dockerfile WORKDIR
+    dockerfile_path = benchmark_dir / "Dockerfile"
+    source_name = _get_source_name_from_dockerfile(dockerfile_path)
+
+    if not source_name:
+        logger.error(f"Could not determine source name from Dockerfile: {dockerfile_path}")
+        return None
+
+    tarball_path = pkgs_dir / f"{source_name}.tar.gz"
+
+    if not tarball_path.exists():
+        logger.error(f"Main repo tarball not found: {tarball_path}")
+        return None
+
+    logger.info(f"Found main repo tarball: {tarball_path}")
+    return tarball_path
+
+
+def extract_tarball_to_dir(tarball_path: Path, dst_path: Path) -> bool:
+    """Extract a tarball to destination directory.
+
+    The tarball is expected to contain a single top-level directory.
+    This directory is extracted and its contents are moved to dst_path.
+
+    Args:
+        tarball_path: Path to .tar.gz file
+        dst_path: Destination directory for extracted source
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if dst_path.exists():
+        logger.info(f"Removing existing destination: {dst_path}")
+        shutil.rmtree(dst_path)
+
+    dst_path.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"Extracting {tarball_path.name} to {dst_path}")
+
+    # Extract to a temp directory first to handle nested directory
+    with TemporaryDirectory() as tmpdir:
+        tmp_extract = Path(tmpdir) / "extracted"
+        tmp_extract.mkdir()
+
+        try:
+            subprocess.check_call(
+                ["tar", "-xzf", str(tarball_path), "-C", str(tmp_extract)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to extract tarball: {e}")
+            return False
+
+        # Find the extracted directory (usually only one top-level dir)
+        extracted_dirs = list(tmp_extract.iterdir())
+        if len(extracted_dirs) == 1 and extracted_dirs[0].is_dir():
+            # Move contents of the single directory to dst_path
+            for item in extracted_dirs[0].iterdir():
+                shutil.move(str(item), str(dst_path / item.name))
+        else:
+            # Move all extracted content directly
+            for item in tmp_extract.iterdir():
+                shutil.move(str(item), str(dst_path / item.name))
+
+    logger.info(f"Successfully extracted to {dst_path}")
+    return True
+
+
+def extract_tarball_to_source(tarball_path: Path, dst_path: Path) -> bool:
+    """Extract a tarball and initialize as git repository for CRS use.
+
+    This is for direct tarball usage with oss-bugfix-crs build/run commands.
+    The tarball should NOT contain .aixcc directory (ground truth).
+
+    Args:
+        tarball_path: Path to .tar.gz file
+        dst_path: Destination directory for extracted source
+
+    Returns:
+        True if successful, False otherwise
+    """
+    if not tarball_path.exists():
+        logger.error(f"Tarball not found: {tarball_path}")
+        return False
+
+    if not extract_tarball_to_dir(tarball_path, dst_path):
+        return False
+
+    # Verify .aixcc directory does not exist
+    aixcc_path = dst_path / ".aixcc"
+    if aixcc_path.exists():
+        logger.error(
+            f"CRITICAL: .aixcc directory found in extracted source at {aixcc_path}. "
+            f"Tarballs for CRS should NOT contain .aixcc directory."
+        )
+        return False
+
+    # Initialize as git repository if not already
+    git_dir = dst_path / ".git"
+    if not git_dir.exists():
+        logger.info("Initializing git repository for extracted source")
+        try:
+            subprocess.check_call(
+                ["git", "init"],
+                cwd=dst_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess.check_call(
+                ["git", "add", "-A"],
+                cwd=dst_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            subprocess.check_call(
+                ["git", "commit", "--no-gpg-sign", "-m", "Initial commit"],
+                cwd=dst_path,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to initialize git repository: {e}")
+            return False
+
+    logger.info(f"Successfully extracted tarball to {dst_path}")
+    return True
+
+
+def pull_project_source_from_tarball(
+    benchmarks_dir: Path, project_name: str, dst_path: Path
+) -> bool:
+    """Pull project source from bundled tarball instead of git clone.
+
+    This is an alternative to pull_project_source() that uses pre-bundled
+    tarballs from crsbench benchmark bundle-all command. This avoids issues
+    with .aixcc directories being present in git clones.
+
+    Args:
+        benchmarks_dir: Directory containing benchmarks with pkgs/ tarballs
+        project_name: OSS-Fuzz project name (e.g., "afc-curl-delta-01")
+        dst_path: Destination path for extracted source
+
+    Returns:
+        True if successful, False otherwise
+    """
+    tarball_path = find_main_repo_tarball(benchmarks_dir, project_name)
+    if not tarball_path:
+        logger.error(
+            f"Could not find main repo tarball for {project_name} in {benchmarks_dir}"
+        )
+        return False
+
+    if not extract_tarball_to_dir(tarball_path, dst_path):
+        return False
+
+    # Verify .aixcc directory does not exist in extracted source
+    # This is critical: .aixcc contains ground truth that CRS should not access
+    aixcc_path = dst_path / ".aixcc"
+    assert not aixcc_path.exists(), (
+        f"CRITICAL: .aixcc directory found in extracted source at {aixcc_path}. "
+        f"Bundled tarballs should NOT contain .aixcc directory. "
+        f"Please regenerate tarball using 'crsbench benchmark bundle'."
+    )
+
+    return True
+
+
 def copy_git_repo(src: Path, dst: Path) -> None:
     """Copy a git repository, properly handling submodules.
 
@@ -242,7 +478,7 @@ def is_git_repository(path: Path) -> bool:
 
 def reset_repository(path: Path) -> bool:
     proc = subprocess.run(
-        f"git reset --hard && git clean -fdx",
+        "git reset --hard",
         cwd=path,
         shell=True,
         stdout=subprocess.DEVNULL,

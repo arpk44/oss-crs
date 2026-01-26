@@ -7,7 +7,7 @@ from bug_fixing.src.oss_patch.project_builder import OSSPatchProjectBuilder
 from bug_fixing.src.oss_patch.functions import (
     get_builder_image_name,
     change_ownership_with_docker,
-    pull_project_source,
+    pull_project_source_from_tarball,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,12 +61,14 @@ class IncrementalSnapshotMaker:
         project_name: str,
         work_dir: Path,
         log_file: Path | None = None,
+        benchmarks_dir: Path | None = None,
     ):
         self.oss_fuzz_path = oss_fuzz_path
         self.project_name = project_name
         self.project_path = oss_fuzz_path / "projects" / self.project_name
         self.work_dir = work_dir
         self.log_file = log_file
+        self.benchmarks_dir = benchmarks_dir
 
         self.required_sanitizers: list[str] = []
 
@@ -300,7 +302,20 @@ class IncrementalSnapshotMaker:
                 if proj_src_path.exists():
                     change_ownership_with_docker(proj_src_path)
                     shutil.rmtree(proj_src_path)
-                pull_project_source(self.project_path, proj_src_path)
+                if not self.benchmarks_dir:
+                    logger.error(
+                        "benchmarks_dir is required. Use --benchmarks-dir to specify "
+                        "the directory containing bundled tarballs."
+                    )
+                    return False
+                logger.info(
+                    f"Using tarball from benchmarks directory: {self.benchmarks_dir}"
+                )
+                if not pull_project_source_from_tarball(
+                    self.benchmarks_dir, self.project_name, proj_src_path
+                ):
+                    logger.error("Failed to extract source from tarball")
+                    return False
 
             # Build base project builder image
             logger.info(f'Creating project builder image: "{base_image}"')

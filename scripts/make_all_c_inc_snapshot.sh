@@ -11,17 +11,22 @@ OSS_CRS_DIR="$(dirname "$SCRIPT_DIR")"
 # Default values
 JOBS=1
 PROJECT_LIST=""
+BENCHMARKS_DIR=""
 PUSH_MODE=""  # base, inc, both, or empty (no push)
 RTS_TOOL=""   # If empty, uses project.yaml rts_mode
 FORCE_REBUILD=false  # Default: skip rebuild if image exists
+FORCE_PUSH=false     # Default: skip push if remote image exists
 SKIP_CLONE=false
 FORCE_PUSH=false
 
 usage() {
-    echo "Usage: $0 <OSS_FUZZ_PATH> [options]"
+    echo "Usage: $0 <OSS_FUZZ_PATH> -b <BENCHMARKS_DIR> [options]"
     echo ""
     echo "Arguments:"
     echo "  OSS_FUZZ_PATH       Path to OSS-Fuzz directory"
+    echo ""
+    echo "Required Options:"
+    echo "  -b, --benchmarks-dir DIR  Benchmarks directory with bundled tarballs (pkgs/)"
     echo ""
     echo "Options:"
     echo "  -j, --jobs N        Number of parallel jobs (default: 1)"
@@ -29,14 +34,14 @@ usage() {
     echo "  --push MODE         Push images to registry. MODE: base, inc, both"
     echo "  --rts-tool TOOL     RTS tool override: binaryrts (C/C++). If not specified, uses project.yaml rts_mode"
     echo "  --force-rebuild     Force rebuild even if local image exists (default: skip)"
+    echo "  --force-push        Force push even if remote image exists (default: skip)"
     echo "  --skip-clone        Skip source code cloning"
     echo "  --force-push        Force push even if images already exist in remote registry"
     echo "  -h, --help          Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 /path/to/oss-fuzz --push both"
-    echo "  $0 /path/to/oss-fuzz -l projects.txt -j 4 --push inc"
-    echo "  $0 /path/to/oss-fuzz --force-rebuild --push base"
+    echo "  $0 ../oss-fuzz -b ../../benchmarks --push both"
+    echo "  $0 ../oss-fuzz -b ../../benchmarks -l projects.txt -j 4 --push inc"
     exit 1
 }
 
@@ -50,6 +55,10 @@ shift
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        -b|--benchmarks-dir)
+            BENCHMARKS_DIR="$2"
+            shift 2
+            ;;
         -j|--jobs)
             JOBS="$2"
             shift 2
@@ -74,6 +83,10 @@ while [[ $# -gt 0 ]]; do
             FORCE_REBUILD=true
             shift
             ;;
+        --force-push)
+            FORCE_PUSH=true
+            shift
+            ;;
         --skip-clone)
             SKIP_CLONE=true
             shift
@@ -92,6 +105,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [ -z "$BENCHMARKS_DIR" ]; then
+    echo "Error: --benchmarks-dir is required"
+    usage
+fi
+
+if [ ! -d "$BENCHMARKS_DIR" ]; then
+    echo "Error: Benchmarks directory not found: $BENCHMARKS_DIR"
+    exit 1
+fi
+
 if ! [[ "$JOBS" =~ ^[0-9]+$ ]] || [ "$JOBS" -lt 1 ]; then
     echo "Error: jobs must be a positive integer"
     exit 1
@@ -106,15 +129,16 @@ mkdir -p "$LOG_DIR" "$RESULT_DIR"
 echo "=========================================="
 echo "C Incremental Build Snapshot Maker"
 echo "=========================================="
-echo "OSS-Fuzz path: $OSS_FUZZ_PATH"
-echo "C projects:    $C_PROJECTS_DIR"
-echo "Log directory: $LOG_DIR"
-echo "Parallel jobs: $JOBS"
-echo "Push mode: ${PUSH_MODE:-none}"
-echo "RTS tool: ${RTS_TOOL:-from project.yaml}"
-echo "Force rebuild: $FORCE_REBUILD"
-echo "Skip clone: $SKIP_CLONE"
-echo "Force push: $FORCE_PUSH"
+echo "OSS-Fuzz path:    $OSS_FUZZ_PATH"
+echo "Benchmarks dir:   $BENCHMARKS_DIR"
+echo "C projects:       $C_PROJECTS_DIR"
+echo "Log directory:    $LOG_DIR"
+echo "Parallel jobs:    $JOBS"
+echo "Push mode:        ${PUSH_MODE:-none}"
+echo "RTS tool:         ${RTS_TOOL:-from project.yaml}"
+echo "Force rebuild:    $FORCE_REBUILD"
+echo "Force push:       $FORCE_PUSH"
+echo "Skip clone:       $SKIP_CLONE"
 
 # Get list of projects
 if [ -n "$PROJECT_LIST" ]; then
@@ -139,7 +163,7 @@ cd "$OSS_CRS_DIR"
 
 # Build command options
 build_cmd_opts() {
-    local opts=""
+    local opts="--benchmarks-dir $BENCHMARKS_DIR"
     if [ -n "$RTS_TOOL" ]; then
         opts="$opts --rts-tool $RTS_TOOL"
     fi
@@ -148,6 +172,9 @@ build_cmd_opts() {
     fi
     if [ "$FORCE_REBUILD" = false ]; then
         opts="$opts --no-rebuild"
+    fi
+    if [ "$FORCE_PUSH" = true ]; then
+        opts="$opts --force-push"
     fi
     if [ "$SKIP_CLONE" = true ]; then
         opts="$opts --skip-clone"
@@ -254,6 +281,7 @@ Parallel Jobs: $JOBS
 Push mode: ${PUSH_MODE:-none}
 RTS tool: ${RTS_TOOL:-from project.yaml}
 Force rebuild: $FORCE_REBUILD
+Force push: $FORCE_PUSH
 Skip clone: $SKIP_CLONE
 Force push: $FORCE_PUSH
 
