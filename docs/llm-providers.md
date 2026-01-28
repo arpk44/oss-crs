@@ -1,4 +1,4 @@
-# Local Models Through LiteLLM Proxy
+# LLM Providers Through LiteLLM Proxy
 
 ## Local model hosted on domain
 
@@ -65,7 +65,7 @@ We added a CRS called `test-local` to check the LiteLLM proxy forwarding.
 You'll need to first update `example_configs/test-local/config-litellm.yaml` with your key, model names, and endpoint URL.
 
 ```sh
-# Set LLM key
+# Set LLM key (can rename environment variable, see NOTE in config-litellm.yaml)
 export VLLM_KEY=<SECRET_KEY>
 
 # No-op, needed to pass runtime checks
