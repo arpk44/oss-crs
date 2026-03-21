@@ -27,9 +27,7 @@ jobs:
       - name: Generate UML class diagram
         run: |
           mkdir -p docs/uml
-          pyreverse -o dot -p oss_patch $(find bug_fixing/src/oss_patch -name "*.py" | tr '\n' ' ') --output-directory docs/uml
-          dot -Grankdir=TB -Tsvg docs/uml/classes_oss_patch.dot -o docs/uml/classes_oss_patch.svg
-          rm -f docs/uml/*.dot
+          pyreverse -o png -p oss_patch bug_fixing/src/oss_patch/ --output-directory docs/uml --rankdir=TB
 
       - name: Commit and push diagram
         run: |
