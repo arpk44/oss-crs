@@ -23,6 +23,7 @@ jobs:
         run: |
           sudo apt-get install -y graphviz
           pip install pylint
+          pip install -e bug_fixing/
 
       - name: Generate UML class diagram
         run: |
