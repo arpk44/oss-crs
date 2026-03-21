@@ -23,16 +23,13 @@ jobs:
         run: |
           sudo apt-get install -y graphviz
           pip install pylint
-          pip install -e .
 
       - name: Generate UML class diagram
         run: |
           mkdir -p docs/uml
-          cd bug_fixing
-          pyreverse -o dot -p oss_patch src/oss_patch/ --output-directory ../docs/uml
-          cd ..
+          pyreverse -o dot -p oss_patch $(find bug_fixing/src/oss_patch -name "*.py" | tr '\n' ' ') --output-directory docs/uml
           dot -Grankdir=TB -Tsvg docs/uml/classes_oss_patch.dot -o docs/uml/classes_oss_patch.svg
-          rm docs/uml/classes_oss_patch.dot
+          rm -f docs/uml/*.dot
 
       - name: Commit and push diagram
         run: |
