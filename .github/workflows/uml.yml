@@ -1,35 +1,27 @@
-﻿name: Update UML Class Diagram
-
+name: Update UML Class Diagram
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
 jobs:
   generate-uml:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v3
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-
       - name: Install dependencies
         run: |
           sudo apt-get install -y graphviz
           pip install pylint
-          
-
       - name: Generate UML class diagram
         run: |
           mkdir -p docs/uml
-          pyreverse -o png -p oss_patch bug_fixing/src/oss_patch/ --output-directory docs/uml
-
+          PYTHONPATH=bug_fixing/src pyreverse -o png -p oss_patch oss_patch --output-directory docs/uml
       - name: Commit and push diagram
         run: |
           git config user.name "github-actions[bot]"
