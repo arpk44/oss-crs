@@ -18,12 +18,10 @@ jobs:
         run: |
           sudo apt-get install -y graphviz
           pip install pylint
-      - name: Debug folder structure
-        run: find . -type f -name "*.py" | head -30
       - name: Generate UML class diagram
         run: |
           mkdir -p docs/uml
-          PYTHONPATH=bug_fixing/src pyreverse -o png -p oss_patch oss_patch --output-directory docs/uml
+          pyreverse -o png -p oss_patch ./oss_crs/ --output-directory docs/uml
       - name: Commit and push diagram
         run: |
           git config user.name "github-actions[bot]"
