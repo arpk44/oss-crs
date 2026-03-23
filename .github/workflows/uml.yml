@@ -18,7 +18,8 @@ jobs:
         run: |
           sudo apt-get install -y graphviz
           pip install pylint
-          pip install bug_fixing/src/
+      - name: Debug folder structure
+        run: find . -type f -name "*.py" | head -30
       - name: Generate UML class diagram
         run: |
           mkdir -p docs/uml
